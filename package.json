@@ -7,12 +7,18 @@
     "start": "next start"
   },
   "dependencies": {
+    "@headlessui/react": "^2.2.4",
     "axios": "^1.10.0",
+    "cloudinary": "^2.7.0",
+    "formidable": "^3.5.4",
     "next": "^15.3.4",
+    "openai": "^5.7.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
     "sql.js": "^1.9.0",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^5.1.7",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.10",

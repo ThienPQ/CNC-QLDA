@@ -6,9 +6,6 @@ export default function handler(req, res) {
     return res.status(405).json({ message: 'Method not allowed' });
   }
 
-  console.log('✅ Connected to SQLite database.');
-  console.log('Body:', req.body);
-
   const { data, fromDate, toDate } = req.body;
 
   if (!data || !Array.isArray(data)) {
@@ -17,17 +14,17 @@ export default function handler(req, res) {
 
   try {
     const stmt = db.prepare(`
-      INSERT INTO reports (tuyen, khoiLuong, tienDo, giaTriThanhToan, ghiChu, fromDate, toDate)
+      INSERT INTO reports (stt, ten_hang_muc, don_vi, khoi_luong_thuc_hien, ghi_chu, fromDate, toDate)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
-    data.forEach((report) => {
+    data.forEach((item) => {
       stmt.run([
-        report.tenTuyen,
-        report.khoiLuong || null,
-        report.tienDo || null,
-        report.giaTriThanhToan || null,
-        report.ghiChu || '',
+        item.stt,
+        item.ten,
+        item.don_vi,
+        item.khoi_luong_thuc_hien || null,
+        item.ghi_chu || '',
         fromDate,
         toDate
       ]);

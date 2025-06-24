@@ -1,79 +1,74 @@
+// pages/banqlda.js
 import { useState } from 'react';
 import axios from 'axios';
-import { useRouter } from 'next/router';
-
-const TENTUYEN = ['CT.3', 'CT.4', 'CT.5', 'Nội khu'];
 
 export default function BanQLDA() {
+  const [file, setFile] = useState(null);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
-  const [data, setData] = useState(
-    TENTUYEN.map((tenTuyen) => ({
-      tenTuyen,
-      khoiLuong: '',
-      tienDo: '',
-      giaTriThanhToan: '',
-      ghiChu: '',
-    }))
-  );
   const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
 
-  const handleChange = (index, field, value) => {
-    const newData = [...data];
-    newData[index][field] = value;
-    setData(newData);
-  };
+  const handleUpload = async (e) => {
+    e.preventDefault();
+    if (!file || !fromDate || !toDate) {
+      alert('Vui lòng chọn file và đầy đủ ngày tháng');
+      return;
+    }
 
-  const handleSubmit = async () => {
+    setIsUploading(true);
     setMessage('');
-    setError('');
+
+    const formData = new FormData();
+    // Gửi file với tên trường là "file"
+    formData.append('file', file);
+    // !! THÊM fromDate và toDate vào formData để gửi đi
+    formData.append('fromDate', fromDate);
+    formData.append('toDate', toDate);
+
     try {
-      const res = await axios.post('/api/check-duplicate-report', { fromDate, toDate });
-      if (res.data.exists) {
-        setError('Dữ liệu đã tồn tại cho khoảng thời gian này.');
-        return;
-      }
-      await axios.post('/api/save-report', { fromDate, toDate, data });
-      setMessage('Đã lưu báo cáo thành công!');
-    } catch (err) {
-      console.error('Lỗi khi lưu báo cáo:', err);
-      setError('Đã xảy ra lỗi khi lưu dữ liệu.');
+      // API endpoint vẫn là '/api/upload-report'
+      const res = await axios.post('/api/upload-report', formData, {
+        headers: {
+          // Axios tự động set Content-Type đúng khi dùng FormData
+          // nên không cần khai báo ở đây
+        },
+      });
+      setMessage(res.data.message);
+    } catch (error) {
+      console.error(error);
+      const errorMessage = error.response?.data?.error || 'Tải lên thất bại.';
+      setMessage(`Lỗi: ${errorMessage}`);
+    } finally {
+        setIsUploading(false);
     }
   };
 
   return (
-    <div>
-      <h1>BAN QLDA - Nhập báo cáo</h1>
-      <div>
-        <label>Từ ngày: <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></label>
-        <label>Đến ngày: <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></label>
+    <form onSubmit={handleUpload} className="p-8 font-sans max-w-xl mx-auto space-y-6">
+      <h1 className="text-2xl font-bold">Gửi Báo Cáo Tuần</h1>
+      <div className="flex flex-col sm:flex-row sm:space-x-4 space-y-4 sm:space-y-0">
+        <div className="flex-1">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Từ ngày:</label>
+          <input type="date" required value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-full p-2 border border-gray-300 rounded-md" />
+        </div>
+        <div className="flex-1">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Đến ngày:</label>
+          <input type="date" required value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-full p-2 border border-gray-300 rounded-md" />
+        </div>
       </div>
-      <table border="1">
-        <thead>
-          <tr>
-            <th>Tuyến</th>
-            <th>Khối lượng</th>
-            <th>Tiến độ (%)</th>
-            <th>Giá trị thanh toán</th>
-            <th>Ghi chú</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((tuyen, index) => (
-            <tr key={tuyen.tenTuyen}>
-              <td>{tuyen.tenTuyen}</td>
-              <td><input value={tuyen.khoiLuong} onChange={(e) => handleChange(index, 'khoiLuong', e.target.value)} /></td>
-              <td><input value={tuyen.tienDo} onChange={(e) => handleChange(index, 'tienDo', e.target.value)} /></td>
-              <td><input value={tuyen.giaTriThanhToan} onChange={(e) => handleChange(index, 'giaTriThanhToan', e.target.value)} /></td>
-              <td><input value={tuyen.ghiChu} onChange={(e) => handleChange(index, 'ghiChu', e.target.value)} /></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <button onClick={handleSubmit}>Lưu</button>
-      {message && <p style={{ color: 'green' }}>{message}</p>}
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-    </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">File báo cáo (.xlsx):</label>
+        <input type="file" required accept=".xlsx" onChange={(e) => setFile(e.target.files[0])} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+      </div>
+      <button
+        type="submit"
+        disabled={isUploading}
+        className="w-full bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 disabled:bg-gray-400"
+      >
+        {isUploading ? 'Đang gửi...' : 'Gửi Báo Cáo'}
+      </button>
+      {message && <p className="mt-4 text-center text-sm font-medium">{message}</p>}
+    </form>
   );
 }
