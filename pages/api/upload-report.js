@@ -27,28 +27,28 @@ export default async function handler(req, res) {
     }
 
     try {
-      // Frontend đang gửi file với tên trường là "file"
-      const file = files.file[0];
-      
+      const file = files.file?.[0];
+      // Lấy tên file mong muốn từ lựa chọn của người dùng ở frontend
+      const desiredFilename = fields.filename?.[0]; 
+
       if (!file) {
         return res.status(400).json({ error: 'Không tìm thấy file để tải lên.' });
       }
+
+      // Kiểm tra xem tên file có hợp lệ không để bảo mật
+      if (!['bao-cao-tuan.xlsx', 'PLHD.xlsx'].includes(desiredFilename)) {
+        return res.status(400).json({ error: 'Loại file không hợp lệ.' });
+      }
       
-      // Chúng ta sẽ luôn lưu file với một tên cố định để trang xem báo cáo có thể tìm thấy
-      const publicFilename = 'bao-cao-tuan.xlsx';
-      
+      // Tải file lên Cloudinary với tên public_id được gửi từ frontend
       const result = await cloudinary.uploader.upload(file.filepath, {
         resource_type: 'raw',
-        public_id: publicFilename,
+        public_id: desiredFilename,
         overwrite: true,
       });
-
-      // Lấy thông tin ngày tháng từ form để hiển thị trong thông báo
-      const fromDate = fields.fromDate?.[0] || 'N/A';
-      const toDate = fields.toDate?.[0] || 'N/A';
       
       res.status(200).json({ 
-          message: `Tải lên thành công báo cáo cho tuần từ ${fromDate} đến ${toDate}.` 
+          message: `Tải lên thành công file: ${desiredFilename}` 
       });
 
     } catch (uploadErr) {
