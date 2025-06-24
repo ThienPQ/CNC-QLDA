@@ -1,24 +1,19 @@
-// pages/lanhdaoban.js
+// pages/lanhdaoban.js (Phiên bản Streaming cuối cùng)
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 
 export default function LanhDaoBan() {
-  // State cho dữ liệu báo cáo
   const [reportData, setReportData] = useState([]);
   const [conclusionText, setConclusionText] = useState('');
   const [recommendationText, setRecommendationText] = useState('');
-  
-  // State cho việc tải trang ban đầu
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
-  // State cho chức năng AI
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState('');
   const [aiError, setAiError] = useState('');
 
-  // Tải dữ liệu báo cáo khi trang được mở
   useEffect(() => {
     const fetchLatest = async () => {
       setLoading(true);
@@ -31,7 +26,6 @@ export default function LanhDaoBan() {
       } catch (err) {
         console.error('Lỗi tải báo cáo:', err);
         setError(err.response?.data?.error || 'Không thể tải được báo cáo. Vui lòng kiểm tra lại file đã upload.');
-        setReportData([]);
       } finally {
         setLoading(false);
       }
@@ -39,7 +33,6 @@ export default function LanhDaoBan() {
     fetchLatest();
   }, []);
 
-  // Hàm xử lý khi nhấn nút AI, có hỗ trợ streaming
   const handleAI = async () => {
     if (reportData.length === 0) {
       setAiError('Không có dữ liệu báo cáo để phân tích.');
@@ -59,10 +52,8 @@ export default function LanhDaoBan() {
         }),
       });
 
-      if (!response.ok) {
-        // Cố gắng đọc lỗi từ server nếu có
-        const errorText = await response.text();
-        throw new Error(errorText || `Server responded with status ${response.status}`);
+      if (!response.body) {
+          throw new Error("Response body is null");
       }
 
       // Lấy về bộ đọc của luồng dữ liệu
@@ -88,10 +79,8 @@ export default function LanhDaoBan() {
     }
   };
 
-  // Hàm định dạng các ô phần trăm
   const formatCellContent = (value, columnName) => {
     const percentColumns = ['% Hoàn thành trong tuần', '% Hoàn thiện theo dự án'];
-    
     if (percentColumns.includes(columnName)) {
       const number = parseFloat(value);
       if (!isNaN(number)) {
@@ -107,13 +96,13 @@ export default function LanhDaoBan() {
       {loading && <p>Đang tải dữ liệu báo cáo mới nhất...</p>}
       {error && <p className="text-red-500 bg-red-100 p-3 rounded">{error}</p>}
       
-      {!loading && !error && (
+      {!loading && !error && reportData.length > 0 && (
         <>
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse border border-gray-400">
               <thead className="bg-gray-200">
                 <tr>
-                  {reportData.length > 0 && Object.keys(reportData[0]).map(header => (
+                  {Object.keys(reportData[0]).map(header => (
                     <th key={header} className="border p-2 font-bold text-sm">{header}</th>
                   ))}
                 </tr>
