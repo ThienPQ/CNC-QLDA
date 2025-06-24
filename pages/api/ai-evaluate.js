@@ -1,24 +1,26 @@
-// pages/api/evaluate-ai.js
-import path from 'path';
-import xlsx from 'xlsx';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+// pages/api/ai-evaluate.js (Phiên bản chuẩn cho OpenAI)
+import OpenAI from 'openai';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// Khởi tạo client OpenAI với key từ .env.local
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-function formatDataForPrompt(title, data) {
-    let formattedString = `### ${title}\n`;
-    if (Array.isArray(data) && data.length > 0) {
-      const headers = Object.keys(data[0]);
-      formattedString += `| ${headers.join(' | ')} |\n`;
-      formattedString += `| ${headers.map(() => '---').join(' | ')} |\n`;
-      data.forEach(row => {
-        formattedString += `| ${headers.map(header => row[header]).join(' | ')} |\n`;
-      });
-    } else if (typeof data === 'string' && data) {
-      formattedString += `${data}\n`;
-    } else {
-      formattedString += 'Không có dữ liệu.\n';
+function formatSlowItemsForPrompt(data) {
+    let formattedString = '';
+    if (!data || data.length === 0) {
+        return 'Không có hạng mục nào bị chậm trong tuần này.\n';
     }
+    
+    data.forEach((row, index) => {
+        formattedString += `--- Hạng mục chậm ${index + 1} ---\n`;
+        formattedString += `Tên công việc: ${row['Hạng mục công việc'] || 'Không rõ'}\n`;
+        formattedString += `Kế hoạch tuần: ${row['Kế hoạch tuần trước'] || 'N/A'}\n`;
+        formattedString += `Thực hiện tuần: ${row['Thực hiện'] || 'N/A'}\n`;
+        formattedString += `% Hoàn thành trong tuần: ${row['% Hoàn thành trong tuần'] || 'N/A'}\n`;
+        formattedString += `Ghi chú: ${row['Ghi chú'] || 'Không có'}\n\n`;
+    });
+
     return formattedString;
 }
 
@@ -28,60 +30,53 @@ export default async function handler(req, res) {
   }
 
   try {
-    // >>> PHẦN QUAN TRỌNG: Nhận dữ liệu từ req.body do frontend gửi lên
-    const weeklyReport = req.body; 
-    // <<< KẾT THÚC PHẦN QUAN TRỌNG
-
+    const weeklyReport = req.body;
     if (!weeklyReport || !weeklyReport.reportData) {
         return res.status(400).json({ error: 'Dữ liệu báo cáo không được gửi đi trong yêu cầu.' });
     }
-    
-    const plhdPath = path.join(process.cwd(), 'public', 'PLHD.xlsx');
-    let contractPlanData = [];
-    try {
-      const workbook = xlsx.readFile(plhdPath);
-      const sheetName = workbook.SheetNames[0];
-      contractPlanData = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
-    } catch (e) {
-      console.error("Không thể đọc file PLHD.xlsx: ", e);
-      return res.status(500).json({ error: 'Không tìm thấy hoặc lỗi file PLHD.xlsx trong thư mục /public.' });
+
+    const slowItems = weeklyReport.reportData.filter(row => {
+        const completionText = row['% Hoàn thành trong tuần'] || '100%';
+        const completionValue = parseFloat(completionText);
+        return completionValue < 100;
+    });
+
+    if (slowItems.length === 0) {
+        return res.status(200).json({ result: 'Chúc mừng! Không có hạng mục nào bị chậm tiến độ trong tuần này.' });
     }
 
-    const prompt = `
-      Là một trợ lý quản lý dự án chuyên nghiệp, hãy phân tích và đánh giá tiến độ dự án dựa trên các thông tin sau:
+    const systemPrompt = `Bạn là một giám đốc dự án xây dựng nhiều kinh nghiệm. Nhiệm vụ của bạn là xem xét các hạng mục đang bị chậm tiến độ và đưa ra các giải pháp xử lý cụ thể, khả thi và chuyên nghiệp.`;
+    
+    const userPrompt = `
+      Dưới đây là danh sách các hạng mục công việc đang bị chậm tiến độ trong tuần vừa qua, cùng với kết luận và kiến nghị chung của người làm báo cáo.
 
-      **A. KẾ HOẠCH THEO HỢP ĐỒNG (Trích xuất từ file PLHD.xlsx):**
-      ${formatDataForPrompt('Bảng khối lượng và tiến độ theo hợp đồng', contractPlanData)}
+      ### CÁC HẠNG MỤC CHẬM TIẾN ĐỘ:
+      ${formatSlowItemsForPrompt(slowItems)}
 
-      **B. BÁO CÁO THỰC TẾ TRONG TUẦN (Trích xuất từ file bao cao tuan.xlsx):**
-      ${formatDataForPrompt('Bảng thực hiện chi tiết', weeklyReport.reportData)}
-
-      **Ghi chú trong tuần:**
-      ${weeklyReport.reportData.map(r => r['Ghi chú']).filter(g => g).join(', ') || 'Không có'}
-
-      **Kết luận của người báo cáo:**
+      ### KẾT LUẬN CHUNG TỪ BÁO CÁO:
       ${weeklyReport.conclusion || 'Không có'}
 
-      **Kiến nghị của người báo cáo:**
+      ### KIẾN NGHỊ CHUNG TỪ BÁO CÁO:
       ${weeklyReport.recommendation || 'Không có'}
 
       ---
-      **YÊU CẦU PHÂN TÍCH:**
-      Dựa vào sự so sánh giữa Kế hoạch (Phần A) và Thực tế (Phần B), hãy đưa ra một bản đánh giá chi tiết và chuyên sâu, bao gồm các mục sau:
-      1. Đánh giá tiến độ và khối lượng.
-      2. Phân tích rủi ro.
-      3. Đề xuất giải pháp.
-      Trình bày kết quả một cách có cấu trúc, chuyên nghiệp, sử dụng markdown.
+      **YÊU CẦU:**
+      Đối với từng hạng mục bị chậm, hãy phân tích nhanh nguyên nhân có thể (dựa vào số liệu và ghi chú) và đề xuất 1-2 hành động cụ thể, ưu tiên để khắc phục tình hình. Trình bày câu trả lời rõ ràng theo từng hạng mục.
     `;
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const result = await model.generateContent(prompt);
-    const text = (await result.response).text();
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+    });
 
-    res.status(200).json({ result: text });
+    const resultText = completion.choices[0].message.content;
+    res.status(200).json({ result: resultText });
 
   } catch (error) {
-    console.error('Lỗi khi gọi API đánh giá AI:', error);
-    res.status(500).json({ error: 'Không thể nhận được đánh giá từ AI.', details: error.message });
+    console.error('Lỗi từ API của OpenAI:', error);
+    res.status(500).json({ error: 'Không thể nhận được đánh giá từ OpenAI.', details: error.message });
   }
 }
