@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@headlessui/react": "^2.2.4",
-    "ai": "^4.3.16",
+    "@vercel/postgres": "^0.10.0",
     "axios": "^1.10.0",
     "cloudinary": "^2.7.0",
     "formidable": "^3.5.4",
