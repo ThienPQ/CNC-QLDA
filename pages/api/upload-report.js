@@ -1,3 +1,4 @@
+// pages/api/upload-report.js
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -11,8 +12,33 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-async function handleContractUpload(filePath) { /* Giữ nguyên như cũ */ }
+// Hàm xử lý khi upload file kế hoạch hợp đồng
+async function handleContractUpload(filePath) {
+  const workbook = xlsx.readFile(filePath);
+  const sheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const contractData = xlsx.utils.sheet_to_json(sheet);
 
+  // Tạo bảng nếu chưa có
+  await sql`CREATE TABLE IF NOT EXISTS contract_items (id SERIAL PRIMARY KEY, item_name TEXT UNIQUE, design_volume NUMERIC, unit TEXT);`;
+  // Xóa kế hoạch cũ để cập nhật mới
+  await sql`DELETE FROM contract_items;`;
+
+  for (const item of contractData) {
+    const itemName = item['Hạng mục công việc'];
+    const designVolume = item['Khối lượng theo HĐ'];
+    const unit = item['Đơn vị'];
+    if (itemName) {
+      await sql`
+        INSERT INTO contract_items (item_name, design_volume, unit) 
+        VALUES (${itemName}, ${designVolume}, ${unit})
+        ON CONFLICT (item_name) DO UPDATE SET design_volume = EXCLUDED.design_volume, unit = EXCLUDED.unit;
+      `;
+    }
+  }
+}
+
+// Hàm xử lý khi upload báo cáo tuần
 async function handleWeeklyReportUpload(filePath, fields) {
   const fromDate = fields.fromDate?.[0];
   const toDate = fields.toDate?.[0];
@@ -22,25 +48,29 @@ async function handleWeeklyReportUpload(filePath, fields) {
   const targetSheetName = workbook.SheetNames.filter(name => name.trim().toLowerCase().startsWith('bc tuần')).pop() 
                        || workbook.SheetNames.filter(name => !/^Sheet\d+$/i.test(name)).pop();
   
-  if (!targetSheetName) throw new Error('Không tìm thấy sheet báo cáo hợp lệ.');
+  if (!targetSheetName) throw new Error('Không tìm thấy sheet báo cáo hợp lệ trong file Excel.');
   
   const sheet = workbook.Sheets[targetSheetName];
+  // Đọc toàn bộ dữ liệu gốc từ vùng A34:Q90
   const allData = xlsx.utils.sheet_to_json(sheet, { range: 'A34:Q90', header: 1, defval: '' });
-  if (!allData || allData.length < 1) throw new Error('Không có dữ liệu trong vùng A34:Q90.');
+  if (!allData || allData.length < 1) throw new Error('Không có dữ liệu trong vùng A34:Q90 của sheet đã chọn.');
   
-  // Chuyển dữ liệu thành một chuỗi JSON hợp lệ để lưu trữ
+  // Lưu toàn bộ dữ liệu thô này vào database
   const reportContent = JSON.stringify(allData);
   
-  // Tạo bảng reports mới nếu chưa có
+  // Tạo bảng reports nếu chưa có
   await sql`
     CREATE TABLE IF NOT EXISTS reports (
-      id SERIAL PRIMARY KEY, week_start_date DATE NOT NULL, week_end_date DATE NOT NULL,
-      raw_data JSONB, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      id SERIAL PRIMARY KEY,
+      week_start_date DATE NOT NULL,
+      week_end_date DATE NOT NULL,
+      raw_data JSONB,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(week_start_date, week_end_date)
     );
   `;
   
-  // Thêm báo cáo mới hoặc cập nhật nếu tuần đó đã tồn tại
+  // Thêm báo cáo mới hoặc cập nhật nếu cùng khoảng thời gian
   await sql`
     INSERT INTO reports (week_start_date, week_end_date, raw_data)
     VALUES (${fromDate}, ${toDate}, ${reportContent})
@@ -48,6 +78,7 @@ async function handleWeeklyReportUpload(filePath, fields) {
   `;
 }
 
+// Handler chính của API
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const form = formidable({});
@@ -57,10 +88,12 @@ export default async function handler(req, res) {
       const desiredFilename = fields.filename?.[0];
       if (!file || !desiredFilename) throw new Error('File hoặc loại file không hợp lệ.');
 
+      // Tải lên Cloudinary để lưu trữ
       await cloudinary.uploader.upload(file.filepath, {
         resource_type: 'raw', public_id: desiredFilename, overwrite: true,
       });
 
+      // Xử lý và lưu vào DB tùy theo loại file
       if (desiredFilename === 'PLHD.xlsx') {
         await handleContractUpload(file.filepath);
       } else if (desiredFilename === 'bao-cao-tuan.xlsx') {
