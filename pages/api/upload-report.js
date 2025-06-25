@@ -26,14 +26,12 @@ export default async function handler(req, res) {
         throw new Error('File hoặc loại file không hợp lệ.');
       }
 
-      // 1. Tải file lên Cloudinary
       await cloudinary.uploader.upload(file.filepath, {
         resource_type: 'raw',
         public_id: desiredFilename,
         overwrite: true,
       });
 
-      // 2. Nếu là file báo cáo tuần, đọc và lưu vào DB
       if (desiredFilename === 'bao-cao-tuan.xlsx') {
         const workbook = xlsx.readFile(file.filepath);
         const targetSheetName = workbook.SheetNames.filter(name => !/^Sheet\d+$/i.test(name)).pop();
@@ -43,8 +41,7 @@ export default async function handler(req, res) {
         const tableData = xlsx.utils.sheet_to_json(sheet, { range: 'A34:Q90', header: 1 });
         const fullSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1 });
         
-        // Trích xuất dữ liệu
-        const headers = tableData[0] || [];
+        const headers = tableData[0] || []; // Lấy mảng headers theo đúng thứ tự
         const rows = tableData.slice(1).map(row => {
           let obj = {};
           headers.forEach((header, i) => { if (header) obj[String(header)] = row[i] || ''; });
@@ -61,23 +58,27 @@ export default async function handler(req, res) {
           }
         });
         
-        // 3. Lưu vào Vercel Postgres
-        // Tạo bảng nếu chưa tồn tại
+        // Cập nhật cấu trúc bảng để thêm cột headers_data
         await sql`
           CREATE TABLE IF NOT EXISTS reports (
             id SERIAL PRIMARY KEY,
+            headers_data JSONB, -- Thêm cột này
             report_data JSONB,
             conclusion TEXT,
             recommendation TEXT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
         `;
-        // Xóa báo cáo cũ
+        // Thêm cột nếu chưa có (dành cho trường hợp bảng đã tồn tại)
+        try {
+          await sql`ALTER TABLE reports ADD COLUMN IF NOT EXISTS headers_data JSONB;`;
+        } catch (e) { console.log("Column headers_data already exists or another alter error."); }
+
         await sql`DELETE FROM reports;`;
-        // Thêm báo cáo mới nhất
+        // Lưu cả headers và rows vào database
         await sql`
-          INSERT INTO reports (report_data, conclusion, recommendation)
-          VALUES (${JSON.stringify(rows)}, ${conclusion}, ${recommendation});
+          INSERT INTO reports (headers_data, report_data, conclusion, recommendation)
+          VALUES (${JSON.stringify(headers)}, ${JSON.stringify(rows)}, ${conclusion}, ${recommendation});
         `;
       }
       
