@@ -5,7 +5,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export default async function handler(req) {
   try {
-    const { reportData } = await req.json(); // Chỉ nhận reportData
+    const { reportData } = await req.json();
     if (!reportData) throw new Error('Dữ liệu báo cáo không được gửi đi.');
 
     const itemsToAnalyze = reportData.filter(row => row['% Hoàn thành trong tuần'] || row['Ghi chú']);
@@ -14,14 +14,8 @@ export default async function handler(req) {
     }
     
     const systemPrompt = `Là một giám đốc dự án nhiều kinh nghiệm, hãy xem xét các hạng mục công việc dưới đây và đưa ra đánh giá ngắn gọn, tập trung vào rủi ro và đề xuất giải pháp.`;
-    const userPrompt = `
-      Dưới đây là các hạng mục công việc trong báo cáo tuần.
-      ### CÁC HẠNG MỤC CẦN CHÚ Ý:
-      ${itemsToAnalyze.map(item => `- Công việc: ${item['CÔNG VIỆC']}, % hoàn thành tuần này: ${item['% Hoàn thành trong tuần'] ? (item['% Hoàn thành trong tuần'] * 100).toFixed(1) + '%' : 'N/A'}, Ghi chú: ${item['Ghi chú'] || 'Không'}`).join('\n')}
-      ---
-      **YÊU CẦU:**
-      Dựa vào thông tin trên, hãy đưa ra các phương án xử lý cho các hạng mục công việc có vẻ đang bị chậm tiến độ hoặc có ghi chú đáng quan ngại.
-    `;
+    const userPrompt = `Dưới đây là các hạng mục công việc trong báo cáo tuần. Hãy đưa ra phương án xử lý cho các hạng mục có vẻ chậm tiến độ hoặc có ghi chú đáng quan ngại.\n\n` + 
+    itemsToAnalyze.map(item => `- Công việc: ${item['CÔNG VIỆC']}, % HT trong tuần: ${item['% Hoàn thành trong tuần'] ? (item['% Hoàn thành trong tuần'] * 100).toFixed(1) + '%' : 'N/A'}, Ghi chú: ${item['Ghi chú'] || 'Không'}`).join('\n');
 
     const responseStream = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",

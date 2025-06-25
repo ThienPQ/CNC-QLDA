@@ -4,6 +4,7 @@ import xlsx from 'xlsx';
 import { sql } from '@vercel/postgres';
 
 export const config = { api: { bodyParser: false } };
+
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -34,17 +35,21 @@ export default async function handler(req, res) {
         
         const sheet = workbook.Sheets[targetSheetName];
         const allData = xlsx.utils.sheet_to_json(sheet, { range: 'A34:Q90', header: 1, defval: '' });
-        if (!allData || allData.length === 0) throw new Error('Không có dữ liệu trong vùng A34:Q90.');
+        if (!allData || allData.length < 1) throw new Error('Không có dữ liệu trong vùng A34:Q90.');
         
         const originalHeaders = allData[0].map(h => String(h || '').trim());
-        const desiredHeaders = ['STT', 'CÔNG VIỆC', 'LÝ TRÌNH', 'ĐƠN VỊ', '% Hoàn thành trong tuần', '% Hoàn thiện theo dự án', 'Ghi chú'];
         
+        // Chỉ định 7 cột cần giữ lại
+        const desiredHeaders = [ 'STT', 'CÔNG VIỆC', 'LÝ TRÌNH', 'ĐƠN VỊ', '% Hoàn thành trong tuần', '% Hoàn thiện theo dự án', 'Ghi chú' ];
+
+        // Tìm chỉ số của các cột này trong file gốc
         const indicesToKeep = desiredHeaders.map(dh => {
           const index = originalHeaders.findIndex(oh => oh.toUpperCase() === dh.toUpperCase());
           if (index === -1) throw new Error(`Không tìm thấy cột bắt buộc: "${dh}"`);
           return index;
         });
 
+        // Tạo dữ liệu mới chỉ chứa 7 cột đã chọn
         const newRowsAsArrays = allData.slice(1)
             .filter(row => row.length > 0 && String(row[0] || '').trim() !== '')
             .map(row => indicesToKeep.map(index => row[index]));
@@ -52,6 +57,7 @@ export default async function handler(req, res) {
         await sql`CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, headers_data JSONB, report_data JSONB, conclusion TEXT, recommendation TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`;
         
         await sql`DELETE FROM reports;`;
+        // Lưu dữ liệu đã được lọc (chỉ 7 cột) vào DB
         await sql`
           INSERT INTO reports (headers_data, report_data, conclusion, recommendation)
           VALUES (${JSON.stringify(desiredHeaders)}, ${JSON.stringify(newRowsAsArrays)}, '', '');

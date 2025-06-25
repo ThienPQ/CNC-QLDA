@@ -21,7 +21,8 @@ export default function LanhDaoBan() {
         setHeaders(res.data.headers || []);
         setReportData(res.data.rows || []);
       } catch (err) {
-        setError(err.response?.data?.error || 'Không thể tải báo cáo.');
+        console.error('Lỗi tải báo cáo:', err);
+        setError(err.response?.data?.error || 'Không thể tải được báo cáo.');
       } finally {
         setLoading(false);
       }
@@ -81,8 +82,7 @@ export default function LanhDaoBan() {
 
   const getCellAlignment = (columnName) => {
     const sColumnName = String(columnName || '').trim();
-    const numericKeywords = ['Thiết kế', 'Tổng KL', 'Lũy kế', 'Kế hoạch', 'Thực hiện', '%'];
-    if (numericKeywords.some(keyword => sColumnName.includes(keyword))) {
+    if (sColumnName.includes('%') || ['Thiết kế', 'Tổng KL', 'Lũy kế', 'Kế hoạch', 'Thực hiện'].some(k => sColumnName.includes(k))) {
       return 'text-right';
     }
     return 'text-left';
@@ -94,8 +94,10 @@ export default function LanhDaoBan() {
       <div className="p-4 sm:p-6 lg:p-8 font-sans bg-gray-50 min-h-screen">
         <div className="max-w-screen-2xl mx-auto">
           <h1 className="text-3xl font-bold text-gray-800 mb-6">Báo Cáo Tiến Độ Tinh Gọn</h1>
-          {loading && <p>Đang tải...</p>}
-          {error && <div role="alert">{error}</div>}
+          
+          {loading && <p className="text-center text-gray-500">Đang tải...</p>}
+          {error && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4" role="alert"><p>{error}</p></div>}
+          
           {!loading && !error && reportData.length > 0 && (
             <div className="space-y-8">
               <div className="overflow-x-auto shadow-md rounded-lg">
@@ -120,24 +122,29 @@ export default function LanhDaoBan() {
                   </tbody>
                 </table>
               </div>
-              <div>
-                <button onClick={handleAI} disabled={isAiLoading} className="bg-indigo-600 ...">
+
+              <div className="pt-4">
+                <button onClick={handleAI} disabled={isAiLoading} className="bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:bg-gray-400 transition-all shadow-md">
                   {isAiLoading ? 'AI đang phân tích...' : 'AI Đánh Giá'}
                 </button>
               </div>
+
               <div className="mt-4">
-                {isAiLoading && !aiResult && <p>Vui lòng chờ...</p>}
-                {aiError && <div role="alert">Lỗi: {aiError}</div>}
+                {isAiLoading && !aiResult && <p className="text-gray-600">Vui lòng chờ...</p>}
+                {aiError && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4" role="alert">Lỗi: {aiError}</div>}
                 {aiResult && (
-                  <div className="p-5 mt-2 border ...">
-                    <h3 className="font-bold ...">Phân Tích từ AI:</h3>
-                    <div><ReactMarkdown>{aiResult}</ReactMarkdown></div>
+                  <div className="p-5 mt-2 border bg-white rounded-lg shadow-sm prose max-w-none">
+                    <h3 className="font-bold text-lg text-gray-800">Phân Tích từ AI:</h3>
+                    <div className="text-gray-700"><ReactMarkdown>{aiResult}</ReactMarkdown></div>
                   </div>
                 )}
               </div>
             </div>
           )}
-          {!loading && !error && reportData.length === 0 && (<p>Không có dữ liệu báo cáo.</p>)}
+
+          {!loading && !error && reportData.length === 0 && (
+            <p className="text-center text-gray-500 mt-10">Không có dữ liệu báo cáo. Vui lòng vào trang upload để tải lên.</p>
+          )}
         </div>
       </div>
     </>
