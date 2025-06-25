@@ -1,4 +1,4 @@
-// pages/api/upload-report.js (Phiên bản cuối cùng, chọn sheet thông minh)
+// pages/api/upload-report.js (Phiên bản cuối cùng, đã sửa lỗi khai báo trùng)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -12,10 +12,31 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-async function handleContractUpload(filePath) { /* Giữ nguyên như cũ */ }
-async function handleWeeklyReportUpload(filePath, fields) { /* Giữ nguyên như cũ */ }
+// Hàm xử lý upload file kế hoạch hợp đồng
+async function handleContractUpload(filePath) {
+  const workbook = xlsx.readFile(filePath);
+  const sheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const contractData = xlsx.utils.sheet_to_json(sheet);
 
-// --- HÀM XỬ LÝ BÁO CÁO TUẦN ĐƯỢC NÂNG CẤP ---
+  await sql`CREATE TABLE IF NOT EXISTS contract_items (id SERIAL PRIMARY KEY, item_name TEXT UNIQUE, design_volume NUMERIC, unit TEXT);`;
+  await sql`DELETE FROM contract_items;`;
+
+  for (const item of contractData) {
+    const itemName = item['Hạng mục công việc'];
+    const designVolume = item['Khối lượng theo HĐ'];
+    const unit = item['Đơn vị'];
+    if (itemName) {
+      await sql`
+        INSERT INTO contract_items (item_name, design_volume, unit) 
+        VALUES (${itemName}, ${designVolume}, ${unit})
+        ON CONFLICT (item_name) DO UPDATE SET design_volume = EXCLUDED.design_volume, unit = EXCLUDED.unit;
+      `;
+    }
+  }
+}
+
+// Hàm xử lý upload báo cáo tuần (chỉ có 1 định nghĩa duy nhất ở đây)
 async function handleWeeklyReportUpload(filePath, fields) {
   const fromDate = fields.fromDate?.[0];
   const toDate = fields.toDate?.[0];
@@ -23,23 +44,18 @@ async function handleWeeklyReportUpload(filePath, fields) {
 
   const workbook = xlsx.readFile(filePath);
   
-  // --- LOGIC CHỌN SHEET MỚI, THÔNG MINH HƠN ---
-  // 1. Tìm tất cả các sheet có tên bắt đầu bằng "BC tuần" (không phân biệt hoa thường)
   const reportSheets = workbook.SheetNames.filter(name => 
     name.trim().toLowerCase().startsWith('bc tuần')
   );
 
   let targetSheetName;
   if (reportSheets.length > 0) {
-    // 2. Nếu tìm thấy, chọn sheet cuối cùng trong danh sách đó
     targetSheetName = reportSheets[reportSheets.length - 1];
   } else {
-    // 3. Nếu không tìm thấy sheet nào có tên "BC tuần...", quay về logic cũ là chọn sheet cuối cùng
     targetSheetName = workbook.SheetNames.filter(name => !/^Sheet\d+$/i.test(name)).pop();
   }
   
   if (!targetSheetName) throw new Error('Không tìm thấy sheet báo cáo hợp lệ trong file Excel.');
-  // --- KẾT THÚC LOGIC CHỌN SHEET MỚI ---
   
   const sheet = workbook.Sheets[targetSheetName];
   const allData = xlsx.utils.sheet_to_json(sheet, { range: 'A34:Q90', header: 1, defval: '' });
@@ -47,7 +63,16 @@ async function handleWeeklyReportUpload(filePath, fields) {
   
   const reportContent = JSON.stringify(allData);
   
-  await sql`CREATE TABLE IF NOT EXISTS reports (...)`; // DDL
+  await sql`
+    CREATE TABLE IF NOT EXISTS reports (
+      id SERIAL PRIMARY KEY,
+      week_start_date DATE NOT NULL,
+      week_end_date DATE NOT NULL,
+      raw_data JSONB,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(week_start_date, week_end_date)
+    );
+  `;
   
   await sql`
     INSERT INTO reports (week_start_date, week_end_date, raw_data)
@@ -55,9 +80,8 @@ async function handleWeeklyReportUpload(filePath, fields) {
     ON CONFLICT (week_start_date, week_end_date) DO UPDATE SET raw_data = EXCLUDED.raw_data;
   `;
 }
-// --- KẾT THÚC HÀM NÂNG CẤP ---
 
-
+// Handler chính của API
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const form = formidable({});
