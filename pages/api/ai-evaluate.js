@@ -1,12 +1,12 @@
-// pages/api/ai-evaluate.js (Phiên bản Streaming ổn định)
+// pages/api/ai-evaluate.js (Phiên bản Streaming ổn định, không cần thư viện "ai")
 import OpenAI from 'openai';
 
-// Khởi tạo client OpenAI
+// Khởi tạo client OpenAI với key từ .env.local
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Cấu hình Edge Runtime
+// Cấu hình Edge Runtime để hỗ trợ streaming hiệu quả
 export const config = {
   runtime: 'edge',
 };
@@ -26,19 +26,13 @@ export default async function handler(req) {
     });
 
     if (slowItems.length === 0) {
-        const stream = new ReadableStream({
-            start(controller) {
-                controller.enqueue('Chúc mừng! Không có hạng mục nào bị chậm tiến độ trong tuần này.');
-                controller.close();
-            },
-        });
-        return new Response(stream);
+      return new Response('Chúc mừng! Không có hạng mục nào bị chậm tiến độ trong tuần này.');
     }
     
     const systemPrompt = `Bạn là một giám đốc dự án xây dựng nhiều kinh nghiệm. Nhiệm vụ của bạn là xem xét các hạng mục đang bị chậm tiến độ và đưa ra các giải pháp xử lý cụ thể, khả thi và chuyên nghiệp.`;
     
     const userPrompt = `Dưới đây là danh sách các hạng mục công việc đang bị chậm tiến độ. Hãy phân tích và đề xuất giải pháp cho từng hạng mục.\n\n` + 
-    slowItems.map((row, index) => `Hạng mục ${index + 1}: ${row['Hạng mục công việc'] || 'Không rõ'}. Kế hoạch: ${row['Kế hoạch tuần trước'] || 'N/A'}. Thực hiện: ${row['Thực hiện'] || 'N/A'}. % Hoàn thành tuần: ${row['% Hoàn thành trong tuần'] || 'N/A'}. Ghi chú: ${row['Ghi chú'] || 'Không có'}`).join('\n\n') +
+    slowItems.map((row, index) => `Hạng mục ${index + 1}: ${row['Hạng mục công việc'] || 'Không rõ'}. Kế hoạch tuần: ${row['Kế hoạch tuần trước'] || 'N/A'}. Thực hiện tuần: ${row['Thực hiện'] || 'N/A'}. % Hoàn thành tuần: ${row['% Hoàn thành trong tuần'] || 'N/A'}. Ghi chú: ${row['Ghi chú'] || 'Không có'}`).join('\n\n') +
     `\n\nKết luận chung từ báo cáo: ${conclusion || 'Không có'}\nKiến nghị chung từ báo cáo: ${recommendation || 'Không có'}`;
 
     // Gọi API của OpenAI với stream: true
@@ -59,8 +53,10 @@ export default async function handler(req) {
         // Lặp qua từng mẩu dữ liệu mà OpenAI trả về
         for await (const chunk of responseStream) {
           const text = chunk.choices[0]?.delta?.content || '';
-          // Mã hóa và gửi mẩu dữ liệu vào luồng của chúng ta
-          controller.enqueue(encoder.encode(text));
+          if (text) {
+             // Mã hóa và gửi mẩu dữ liệu vào luồng của chúng ta
+            controller.enqueue(encoder.encode(text));
+          }
         }
         // Đóng luồng khi không còn dữ liệu
         controller.close();
@@ -73,6 +69,7 @@ export default async function handler(req) {
 
   } catch (error) {
     console.error('Lỗi trong API streaming:', error);
+    // Trả về lỗi dưới dạng một đối tượng JSON chuẩn
     return new Response(JSON.stringify({ error: 'Không thể nhận được đánh giá từ OpenAI.' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
