@@ -1,4 +1,4 @@
-// pages/api/upload-report.js (Phiên bản cuối cùng, đọc từ vùng A34:Q90)
+// pages/api/upload-report.js (Phiên bản sửa lỗi cú pháp SQL cuối cùng)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -39,11 +39,10 @@ export default async function handler(req, res) {
         
         const sheet = workbook.Sheets[targetSheetName];
         
-        // --- SỬA LẠI Ở ĐÂY: Đọc chính xác vùng A34:Q90 theo yêu cầu ---
         const tableData = xlsx.utils.sheet_to_json(sheet, { 
             range: 'A34:Q90', 
             header: 1,
-            defval: '' // Đảm bảo các ô trống cũng được đọc là chuỗi rỗng
+            defval: '' 
         });
         
         if (!tableData || tableData.length === 0) {
@@ -53,7 +52,6 @@ export default async function handler(req, res) {
         const headers = tableData[0] || [];
         const rowsAsArrays = tableData.slice(1).filter(row => row.length > 0 && row.some(cell => cell !== null && cell !== ''));
         
-        // Trích xuất kết luận và kiến nghị từ toàn bộ sheet
         const fullSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1 });
         let conclusion = '';
         let recommendation = '';
@@ -65,8 +63,17 @@ export default async function handler(req, res) {
           }
         });
         
-        await sql`CREATE TABLE IF NOT EXISTS reports (...)`; // DDL
-        await sql`ALTER TABLE reports ADD COLUMN IF NOT EXISTS headers_data JSONB;`;
+        // SỬA LỖI Ở ĐÂY: Viết đầy đủ và chính xác câu lệnh tạo bảng
+        await sql`
+          CREATE TABLE IF NOT EXISTS reports (
+            id SERIAL PRIMARY KEY,
+            headers_data JSONB,
+            report_data JSONB,
+            conclusion TEXT,
+            recommendation TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+        `;
 
         await sql`DELETE FROM reports;`;
         await sql`
