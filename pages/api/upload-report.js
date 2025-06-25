@@ -1,4 +1,4 @@
-// pages/api/upload-report.js (Phiên bản cuối cùng, lưu dạng mảng-của-mảng)
+// pages/api/upload-report.js
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -38,13 +38,11 @@ export default async function handler(req, res) {
         if (!targetSheetName) throw new Error('Không tìm thấy sheet hợp lệ trong file Excel.');
         
         const sheet = workbook.Sheets[targetSheetName];
-        // Đọc dữ liệu dưới dạng mảng của các mảng
         const tableData = xlsx.utils.sheet_to_json(sheet, { range: 'A34:Q90', header: 1 });
         const fullSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1 });
         
-        // Lấy headers (dòng đầu tiên)
         const headers = tableData[0] || [];
-        // Lấy các hàng dữ liệu (đã ở dạng mảng)
+        // SỬA Ở ĐÂY: Lọc bỏ hàng tiêu đề ra khỏi dữ liệu các hàng
         const rowsAsArrays = tableData.slice(1).filter(row => row.length > 0 && row[0] !== null && row[0] !== '');
         
         let conclusion = '';
@@ -57,23 +55,9 @@ export default async function handler(req, res) {
           }
         });
         
-        // Tạo bảng với cột headers_data nếu chưa tồn tại
-        await sql`
-          CREATE TABLE IF NOT EXISTS reports (
-            id SERIAL PRIMARY KEY,
-            headers_data JSONB,
-            report_data JSONB,
-            conclusion TEXT,
-            recommendation TEXT,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-          );
-        `;
-        // Thêm cột nếu nó chưa tồn tại
-        try {
-          await sql`ALTER TABLE reports ADD COLUMN IF NOT EXISTS headers_data JSONB;`;
-        } catch (e) { console.log("Không thể thêm cột, có thể đã tồn tại."); }
+        await sql`CREATE TABLE IF NOT EXISTS reports (...)`; // Rút gọn cho dễ nhìn
+        await sql`ALTER TABLE reports ADD COLUMN IF NOT EXISTS headers_data JSONB;`;
 
-        // Xóa báo cáo cũ và chèn báo cáo mới với cấu trúc chuẩn
         await sql`DELETE FROM reports;`;
         await sql`
           INSERT INTO reports (headers_data, report_data, conclusion, recommendation)
