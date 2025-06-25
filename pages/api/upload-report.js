@@ -1,19 +1,28 @@
+// pages/api/upload-report.js (Phiên bản cuối cùng, đã sửa lỗi API Key)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
 import { sql } from '@vercel/postgres';
 
 export const config = { api: { bodyParser: false } };
-cloudinary.config({ /* ... */ });
+
+// === PHẦN CẤU HÌNH ĐẦY ĐỦ VÀ ĐÚNG ĐÃ ĐƯỢC THÊM LẠI ===
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+// =======================================================
 
 async function handleContractUpload(filePath) {
   const workbook = xlsx.readFile(filePath);
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
-  // Giả sử file PLHD có các cột: 'Hạng mục công việc', 'Khối lượng theo HĐ', 'Đơn vị'
   const contractData = xlsx.utils.sheet_to_json(sheet);
 
-  await sql`DELETE FROM contract_items;`; // Xóa kế hoạch cũ trước khi cập nhật
+  await sql`CREATE TABLE IF NOT EXISTS contract_items (id SERIAL PRIMARY KEY, item_name TEXT UNIQUE, design_volume NUMERIC, unit TEXT);`;
+  await sql`DELETE FROM contract_items;`;
+
   for (const item of contractData) {
     const itemName = item['Hạng mục công việc'];
     const designVolume = item['Khối lượng theo HĐ'];
@@ -41,9 +50,8 @@ async function handleWeeklyReportUpload(filePath, fields) {
   const allData = xlsx.utils.sheet_to_json(sheet, { range: 'A34:Q90', header: 1, defval: '' });
   if (!allData || allData.length < 1) throw new Error('Không có dữ liệu trong vùng A34:Q90.');
   
-  const reportContent = JSON.stringify(allData); // Lưu toàn bộ nội dung Excel thô
+  const reportContent = JSON.stringify(allData);
   
-  // Tạo bảng reports mới nếu chưa có
   await sql`
     CREATE TABLE IF NOT EXISTS reports (
       id SERIAL PRIMARY KEY,
@@ -55,7 +63,6 @@ async function handleWeeklyReportUpload(filePath, fields) {
     );
   `;
   
-  // Thêm báo cáo mới hoặc cập nhật nếu tuần đó đã tồn tại
   await sql`
     INSERT INTO reports (week_start_date, week_end_date, raw_data)
     VALUES (${fromDate}, ${toDate}, ${reportContent})
@@ -72,12 +79,10 @@ export default async function handler(req, res) {
       const desiredFilename = fields.filename?.[0];
       if (!file || !desiredFilename) throw new Error('File hoặc loại file không hợp lệ.');
 
-      // Tải lên Cloudinary để lưu trữ
       await cloudinary.uploader.upload(file.filepath, {
         resource_type: 'raw', public_id: desiredFilename, overwrite: true,
       });
 
-      // Xử lý và lưu vào DB tùy theo loại file
       if (desiredFilename === 'PLHD.xlsx') {
         await handleContractUpload(file.filepath);
       } else if (desiredFilename === 'bao-cao-tuan.xlsx') {
