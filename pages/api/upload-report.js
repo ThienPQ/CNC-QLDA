@@ -1,4 +1,4 @@
-// pages/api/upload-report.js
+// pages/api/upload-report.js (Phiên bản sửa lỗi cú pháp SQL)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -42,7 +42,6 @@ export default async function handler(req, res) {
         const fullSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1 });
         
         const headers = tableData[0] || [];
-        // SỬA Ở ĐÂY: Lọc bỏ hàng tiêu đề ra khỏi dữ liệu các hàng
         const rowsAsArrays = tableData.slice(1).filter(row => row.length > 0 && row[0] !== null && row[0] !== '');
         
         let conclusion = '';
@@ -55,9 +54,18 @@ export default async function handler(req, res) {
           }
         });
         
-        await sql`CREATE TABLE IF NOT EXISTS reports (...)`; // Rút gọn cho dễ nhìn
-        await sql`ALTER TABLE reports ADD COLUMN IF NOT EXISTS headers_data JSONB;`;
-
+        // SỬA LỖI Ở ĐÂY: Viết đầy đủ câu lệnh tạo bảng
+        await sql`
+          CREATE TABLE IF NOT EXISTS reports (
+            id SERIAL PRIMARY KEY,
+            headers_data JSONB,
+            report_data JSONB,
+            conclusion TEXT,
+            recommendation TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+        `;
+        
         await sql`DELETE FROM reports;`;
         await sql`
           INSERT INTO reports (headers_data, report_data, conclusion, recommendation)
