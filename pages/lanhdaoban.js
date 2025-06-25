@@ -4,17 +4,19 @@ import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 
 export default function LanhDaoBan() {
-  const [headers, setHeaders] = useState([]); // Thêm state cho headers
-  const [reportData, setReportData] = useState([]);
+  const [headers, setHeaders] = useState([]);
+  const [reportData, setReportData] = useState([]); // Giờ đây sẽ là mảng của các mảng
   const [conclusionText, setConclusionText] = useState('');
   const [recommendationText, setRecommendationText] = useState('');
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
+  // ... (phần state cho AI giữ nguyên)
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState('');
   const [aiError, setAiError] = useState('');
+
 
   useEffect(() => {
     const fetchLatest = async () => {
@@ -22,14 +24,13 @@ export default function LanhDaoBan() {
       setError('');
       try {
         const res = await axios.get('/api/get-latest-report');
-        setHeaders(res.data.headers || []); // Lưu lại headers
+        setHeaders(res.data.headers || []);
         setReportData(res.data.rows || []);
         setConclusionText(res.data.conclusion || '');
         setRecommendationText(res.data.recommendation || '');
       } catch (err) {
         console.error('Lỗi tải báo cáo:', err);
         setError(err.response?.data?.error || 'Không thể tải được báo cáo.');
-        setReportData([]);
       } finally {
         setLoading(false);
       }
@@ -40,8 +41,16 @@ export default function LanhDaoBan() {
   // ... (hàm handleAI giữ nguyên)
   const handleAI = async () => { /* ... */ };
 
-  // ... (hàm formatCellContent giữ nguyên)
-  const formatCellContent = (value, columnName) => { /* ... */ };
+  const formatCellContent = (value, columnName) => {
+    const percentColumns = ['% Hoàn thành trong tuần', '% Hoàn thiện theo dự án'];
+    if (percentColumns.includes(columnName)) {
+      const number = parseFloat(value);
+      if (!isNaN(number)) {
+        return `${(number * 100).toFixed(2)}%`;
+      }
+    }
+    return value;
+  };
 
   return (
     <div className="p-8 font-sans">
@@ -55,19 +64,19 @@ export default function LanhDaoBan() {
             <table className="min-w-full border-collapse border border-gray-400">
               <thead className="bg-gray-200">
                 <tr>
-                  {/* Dùng mảng headers để vẽ tiêu đề */}
                   {headers.map(header => (
                     <th key={header} className="border p-2 font-bold text-sm">{header}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {reportData.map((row, index) => (
-                  <tr key={index} className="hover:bg-gray-100 text-sm">
-                    {/* Dùng mảng headers để lấy dữ liệu đúng thứ tự */}
-                    {headers.map((header, cellIndex) => (
+                {/* THAY ĐỔI CÁCH VẼ BẢNG */}
+                {reportData.map((rowArray, rowIndex) => (
+                  <tr key={rowIndex} className="hover:bg-gray-100 text-sm">
+                    {rowArray.map((cellValue, cellIndex) => (
                        <td key={cellIndex} className="border p-2">
-                        {formatCellContent(row[header], header)}
+                        {/* Lấy tên cột từ mảng headers để định dạng */}
+                        {formatCellContent(cellValue, headers[cellIndex])}
                        </td>
                     ))}
                   </tr>

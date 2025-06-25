@@ -38,15 +38,13 @@ export default async function handler(req, res) {
         if (!targetSheetName) throw new Error('Không tìm thấy sheet hợp lệ trong file Excel.');
         
         const sheet = workbook.Sheets[targetSheetName];
+        // Đọc dữ liệu dưới dạng mảng của các mảng
         const tableData = xlsx.utils.sheet_to_json(sheet, { range: 'A34:Q90', header: 1 });
         const fullSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1 });
         
-        const headers = tableData[0] || []; // Lấy mảng headers theo đúng thứ tự
-        const rows = tableData.slice(1).map(row => {
-          let obj = {};
-          headers.forEach((header, i) => { if (header) obj[String(header)] = row[i] || ''; });
-          return obj;
-        }).filter(obj => Object.keys(obj).length > 0 && obj[Object.keys(obj)[0]] !== '');
+        const headers = tableData[0] || [];
+        // Lấy các hàng dữ liệu (đã ở dạng mảng)
+        const rowsAsArrays = tableData.slice(1).filter(row => row.length > 0 && row[0] !== '');
         
         let conclusion = '';
         let recommendation = '';
@@ -58,27 +56,23 @@ export default async function handler(req, res) {
           }
         });
         
-        // Cập nhật cấu trúc bảng để thêm cột headers_data
         await sql`
           CREATE TABLE IF NOT EXISTS reports (
             id SERIAL PRIMARY KEY,
-            headers_data JSONB, -- Thêm cột này
+            headers_data JSONB,
             report_data JSONB,
             conclusion TEXT,
             recommendation TEXT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
         `;
-        // Thêm cột nếu chưa có (dành cho trường hợp bảng đã tồn tại)
-        try {
-          await sql`ALTER TABLE reports ADD COLUMN IF NOT EXISTS headers_data JSONB;`;
-        } catch (e) { console.log("Column headers_data already exists or another alter error."); }
+        await sql`ALTER TABLE reports ADD COLUMN IF NOT EXISTS headers_data JSONB;`;
 
         await sql`DELETE FROM reports;`;
-        // Lưu cả headers và rows vào database
+        // Lưu headers (mảng) và rowsAsArrays (mảng của các mảng)
         await sql`
           INSERT INTO reports (headers_data, report_data, conclusion, recommendation)
-          VALUES (${JSON.stringify(headers)}, ${JSON.stringify(rows)}, ${conclusion}, ${recommendation});
+          VALUES (${JSON.stringify(headers)}, ${JSON.stringify(rowsAsArrays)}, ${conclusion}, ${recommendation});
         `;
       }
       

@@ -3,7 +3,6 @@ import { sql } from '@vercel/postgres';
 
 export default async function handler(req, res) {
   try {
-    // Truy vấn thêm cả headers_data
     const { rows } = await sql`
       SELECT headers_data, report_data, conclusion, recommendation 
       FROM reports 
@@ -17,10 +16,9 @@ export default async function handler(req, res) {
 
     const latestReport = rows[0];
     
-    // Trả về dữ liệu bao gồm cả headers
     res.status(200).json({
-      headers: latestReport.headers_data || Object.keys(latestReport.report_data[0] || {}), // Dự phòng nếu header null
-      rows: latestReport.report_data,
+      headers: latestReport.headers_data || [],
+      rows: latestReport.report_data || [],
       conclusion: latestReport.conclusion,
       recommendation: latestReport.recommendation,
     });
