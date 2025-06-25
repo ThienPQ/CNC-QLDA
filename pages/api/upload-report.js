@@ -1,4 +1,4 @@
-// pages/api/upload-report.js (Phiên bản cuối cùng, đã sửa lỗi API Key)
+// pages/api/upload-report.js (Phiên bản cuối cùng, đọc từ vùng A34:Q90)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -6,7 +6,6 @@ import { sql } from '@vercel/postgres';
 
 export const config = { api: { bodyParser: false } };
 
-// PHẦN CẤU HÌNH ĐẦY ĐỦ VÀ ĐÚNG
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -19,66 +18,60 @@ export default async function handler(req, res) {
   const form = formidable({});
   form.parse(req, async (err, fields, files) => {
     try {
+      if (err) throw new Error('Lỗi khi parse form data.');
+
       const file = files.file?.[0];
       const desiredFilename = fields.filename?.[0];
       if (!file || !['bao-cao-tuan.xlsx', 'PLHD.xlsx'].includes(desiredFilename)) {
         throw new Error('File hoặc loại file không hợp lệ.');
       }
 
-      // 1. Tải file lên Cloudinary
       await cloudinary.uploader.upload(file.filepath, {
         resource_type: 'raw',
         public_id: desiredFilename,
         overwrite: true,
       });
 
-      // 2. Nếu là file báo cáo tuần, đọc, lọc và lưu vào DB
       if (desiredFilename === 'bao-cao-tuan.xlsx') {
         const workbook = xlsx.readFile(file.filepath);
         const targetSheetName = workbook.SheetNames.filter(name => !/^Sheet\d+$/i.test(name)).pop();
-        if (!targetSheetName) throw new Error('Không tìm thấy sheet hợp lệ trong file Excel.');
+        if (!targetSheetName) throw new Error('Không tìm thấy sheet báo cáo hợp lệ trong file Excel.');
         
         const sheet = workbook.Sheets[targetSheetName];
-        // Đọc từ vùng A34:Q90 theo yêu cầu
-        const allData = xlsx.utils.sheet_to_json(sheet, { range: 'A34:Q90', header: 1 });
         
-        const originalHeaders = allData[0] || [];
-        const desiredHeaders = [
-            'STT', 'CÔNG VIỆC', 'LÝ TRÌNH', 'ĐƠN VỊ', 
-            '% Hoàn thành trong tuần', '% Hoàn thiện theo dự án', 'Ghi chú'
-        ];
+        // --- SỬA LẠI Ở ĐÂY: Đọc chính xác vùng A34:Q90 theo yêu cầu ---
+        const tableData = xlsx.utils.sheet_to_json(sheet, { 
+            range: 'A34:Q90', 
+            header: 1,
+            defval: '' // Đảm bảo các ô trống cũng được đọc là chuỗi rỗng
+        });
         
-        // Tìm chỉ số (index) của các cột cần giữ lại
-        const indicesToKeep = desiredHeaders.map(dh => 
-            originalHeaders.findIndex(oh => String(oh).trim() === dh)
-        );
-
-        if (indicesToKeep.some(index => index === -1)) {
-            throw new Error('Một hoặc nhiều tên cột yêu cầu không được tìm thấy trong file Excel. Vui lòng kiểm tra lại tên cột.');
+        if (!tableData || tableData.length === 0) {
+            throw new Error('Không tìm thấy dữ liệu trong vùng A34:Q90. Vui lòng kiểm tra lại file Excel.');
         }
         
-        // Lọc lại dữ liệu của mỗi hàng để chỉ giữ lại các cột tương ứng
-        const newRowsAsArrays = allData.slice(1)
-            .filter(row => row.length > 0 && row[0] !== null && row[0] !== '')
-            .map(row => indicesToKeep.map(index => row[index]));
+        const headers = tableData[0] || [];
+        const rowsAsArrays = tableData.slice(1).filter(row => row.length > 0 && row.some(cell => cell !== null && cell !== ''));
         
-        // Tạo bảng nếu chưa tồn tại
-        await sql`
-          CREATE TABLE IF NOT EXISTS reports (
-            id SERIAL PRIMARY KEY,
-            headers_data JSONB,
-            report_data JSONB,
-            conclusion TEXT,
-            recommendation TEXT,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-          );
-        `;
+        // Trích xuất kết luận và kiến nghị từ toàn bộ sheet
+        const fullSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1 });
+        let conclusion = '';
+        let recommendation = '';
+        fullSheetData.forEach(row => {
+          if (row && typeof row[0] === 'string') {
+            const firstCell = row[0].trim().toUpperCase();
+            if (firstCell.includes('KẾT LUẬN')) conclusion = row[1] || '';
+            if (firstCell.includes('KIẾN NGHỊ')) recommendation = row[1] || '';
+          }
+        });
         
+        await sql`CREATE TABLE IF NOT EXISTS reports (...)`; // DDL
+        await sql`ALTER TABLE reports ADD COLUMN IF NOT EXISTS headers_data JSONB;`;
+
         await sql`DELETE FROM reports;`;
-        // Lưu dữ liệu đã được lọc (chỉ 7 cột) vào DB
         await sql`
           INSERT INTO reports (headers_data, report_data, conclusion, recommendation)
-          VALUES (${JSON.stringify(desiredHeaders)}, ${JSON.stringify(newRowsAsArrays)}, '', '');
+          VALUES (${JSON.stringify(headers)}, ${JSON.stringify(rowsAsArrays)}, ${conclusion}, ${recommendation});
         `;
       }
       
