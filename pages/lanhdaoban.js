@@ -1,4 +1,4 @@
-// pages/lanhdaoban.js (Phiên bản Chẩn Đoán Lỗi)
+// pages/lanhdaoban.js (Phiên bản cuối cùng, tổng hợp tất cả các chức năng)
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
@@ -7,7 +7,6 @@ import Head from 'next/head';
 export default function LanhDaoBan() {
   const [headers, setHeaders] = useState([]);
   const [reportData, setReportData] = useState([]);
-  // ... các state khác giữ nguyên
   const [conclusionText, setConclusionText] = useState('');
   const [recommendationText, setRecommendationText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -15,7 +14,6 @@ export default function LanhDaoBan() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState('');
   const [aiError, setAiError] = useState('');
-
 
   useEffect(() => {
     const fetchLatest = async () => {
@@ -37,46 +35,158 @@ export default function LanhDaoBan() {
     fetchLatest();
   }, []);
 
-  const handleAI = async () => { /* ... giữ nguyên như cũ ... */ };
-
-  // --- HÀM ĐỊNH DẠNG VỚI CHỨC NĂNG DEBUG ---
-  const formatCellContent = (value, columnName) => {
-    // Danh sách các cột cần định dạng số
-    const numericColumnsToFormat = [
-      'Thiết kế', 'Tổng KL', 'Lũy kế tuần trước', 
-      'Kế hoạch tuần trước', 'Thực hiện', 'Lũy kế đến nay'
-    ];
-    
-    const trimmedColumnName = columnName ? String(columnName).trim() : '';
-
-    // LOGGING ĐỂ DEBUG: In ra tên cột và so sánh
-    if (numericColumnsToFormat.includes(trimmedColumnName)) {
-      // Nếu tìm thấy, log ra để xác nhận
-      console.log(`[DEBUG] OK: Cột '${trimmedColumnName}' được tìm thấy và sẽ được định dạng.`);
-    } else {
-      // Nếu không tìm thấy, và giá trị có vẻ là số, đây là điểm đáng ngờ.
-      if (value && !isNaN(Number(value)) && !trimmedColumnName.includes('%')) {
-        console.warn(`[DEBUG] LỖI?: Cột '${trimmedColumnName}' không được định dạng. Giá trị: '${value}'`);
-        // In ra mã của từng ký tự trong tên cột để tìm ký tự lạ
-        const charCodes = [];
-        for (let i = 0; i < columnName.length; i++) {
-            charCodes.push(columnName.charCodeAt(i));
-        }
-        console.log(`[DEBUG] Mã ký tự của tên cột '${columnName}' là: [${charCodes.join(', ')}]`);
-      }
+  const handleAI = async () => {
+    if (reportData.length === 0) {
+      setAiError('Không có dữ liệu báo cáo để phân tích.');
+      return;
     }
-    
-    // Logic định dạng giữ nguyên như cũ
-    if (value === null || value === '' || isNaN(Number(value))) return value;
+    setIsAiLoading(true);
+    setAiResult('');
+    setAiError('');
+    try {
+      const dataForAI = reportData.map(rowArray => {
+        const obj = {};
+        headers.forEach((header, index) => {
+          obj[header] = rowArray[index];
+        });
+        return obj;
+      });
+
+      const response = await fetch('/api/ai-evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reportData: dataForAI,
+          conclusion: conclusionText,
+          recommendation: recommendationText,
+        }),
+      });
+
+      if (!response.body) {
+        throw new Error("Response body is null");
+      }
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(JSON.parse(errorText).error || 'Lỗi không xác định từ server.');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        setAiResult((prev) => prev + chunk);
+      }
+    } catch (error) {
+      console.error('Lỗi khi gọi API đánh giá AI:', error);
+      setAiError(error.message);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const formatCellContent = (value, columnName) => {
+    const trimmedColumnName = columnName ? String(columnName).trim() : '';
+    if (value === null || value === '' || isNaN(Number(value))) {
+      return value;
+    }
     const number = parseFloat(value);
-    if (trimmedColumnName.includes('%')) return `${(number * 100).toFixed(2)}%`;
-    if (numericColumnsToFormat.includes(trimmedColumnName)) return number.toFixed(2);
+    if (trimmedColumnName.includes('%')) {
+      return `${(number * 100).toFixed(2)}%`;
+    }
+    const numericColumns = ['Thiết kế', 'Tổng KL', 'Lũy kế tuần trước', 'Kế hoạch tuần trước', 'Thực hiện', 'Lũy kế đến nay'];
+    if (numericColumns.includes(trimmedColumnName)) {
+      return number.toFixed(2);
+    }
     return value;
   };
 
-  const isNumericColumn = (columnName) => { /* ... giữ nguyên như cũ ... */ };
+  const isNumericColumn = (columnName) => {
+    const trimmedColumnName = columnName ? String(columnName).trim() : '';
+    const allNumericColumns = ['Thiết kế', 'Tổng KL', 'Lũy kế tuần trước', 'Kế hoạch tuần trước', 'Thực hiện', 'Lũy kế đến nay'];
+    return allNumericColumns.includes(trimmedColumnName) || trimmedColumnName.includes('%');
+  };
 
   return (
-    // ... Phần JSX giữ nguyên y hệt như cũ ...
+    <>
+      <Head>
+        <title>Báo Cáo Tiến Độ Dự Án</title>
+      </Head>
+      <div className="p-4 sm:p-6 lg:p-8 font-sans bg-gray-50 min-h-screen">
+        <div className="max-w-screen-2xl mx-auto">
+          <h1 className="text-3xl font-bold text-gray-800 mb-6">Bảng Theo Dõi Tiến Độ Dự Án</h1>
+          
+          {loading && <p className="text-center text-gray-600">Đang tải dữ liệu báo cáo mới nhất...</p>}
+          {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative" role="alert">{error}</div>}
+          
+          {!loading && !error && reportData.length > 0 && (
+            <div className="space-y-8">
+              <div className="overflow-x-auto shadow-md rounded-lg">
+                <table className="min-w-full divide-y divide-gray-300">
+                  <thead className="bg-gray-100">
+                    <tr>
+                      {headers.map(header => (
+                        <th key={header} scope="col" className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider whitespace-nowrap">
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {reportData.map((rowArray, rowIndex) => (
+                      <tr key={rowIndex} className="hover:bg-gray-50 transition-colors duration-150">
+                        {rowArray.map((cellValue, cellIndex) => {
+                          const header = headers[cellIndex];
+                          const isNumeric = isNumericColumn(header);
+                          return (
+                            <td key={cellIndex} className={`px-4 py-3 text-sm text-gray-800 border-t border-gray-200 ${isNumeric ? 'text-right' : 'text-left'}`}>
+                              {formatCellContent(cellValue, header)}
+                            </td>
+                          );
+                         })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="p-5 border bg-white rounded-lg shadow-sm">
+                  <h3 className="font-bold text-lg mb-2 text-gray-800">Kết luận</h3>
+                  <p className="whitespace-pre-wrap text-gray-700">{conclusionText || 'Không có dữ liệu.'}</p>
+                </div>
+                <div className="p-5 border bg-white rounded-lg shadow-sm">
+                  <h3 className="font-bold text-lg mb-2 text-gray-800">Kiến nghị</h3>
+                  <p className="whitespace-pre-wrap text-gray-700">{recommendationText || 'Không có dữ liệu.'}</p>
+                </div>
+              </div>
+
+              <div>
+                <button onClick={handleAI} disabled={isAiLoading} className="bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 disabled:bg-gray-400 transition-all shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                  {isAiLoading ? 'AI đang phân tích...' : 'AI Đánh Giá Chuyên Sâu'}
+                </button>
+              </div>
+
+              <div className="mt-4">
+                {isAiLoading && !aiResult && <p className="text-gray-600">Vui lòng chờ, AI đang kết nối và phân tích dữ liệu...</p>}
+                {aiError && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg" role="alert">Lỗi: {aiError}</div>}
+                {aiResult && (
+                  <div className="p-5 mt-2 border bg-white rounded-lg prose max-w-none shadow-sm">
+                    <h3 className="font-bold text-lg mb-2 text-gray-800">Phân Tích từ AI:</h3>
+                    <div className="text-gray-700">
+                      <ReactMarkdown>{aiResult}</ReactMarkdown>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+           {!loading && !error && reportData.length === 0 && (
+             <p className="text-center text-gray-500 mt-10">Không có dữ liệu báo cáo để hiển thị. Vui lòng vào trang upload để tải lên.</p>
+           )}
+        </div>
+      </div>
+    </>
   );
 }
