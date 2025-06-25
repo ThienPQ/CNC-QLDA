@@ -1,11 +1,9 @@
-// pages/api/upload-report.js (Phiên bản sửa lỗi cú pháp SQL cuối cùng)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
 import { sql } from '@vercel/postgres';
 
 export const config = { api: { bodyParser: false } };
-
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -18,14 +16,11 @@ export default async function handler(req, res) {
   const form = formidable({});
   form.parse(req, async (err, fields, files) => {
     try {
-      if (err) throw new Error('Lỗi khi parse form data.');
-
       const file = files.file?.[0];
       const desiredFilename = fields.filename?.[0];
       if (!file || !['bao-cao-tuan.xlsx', 'PLHD.xlsx'].includes(desiredFilename)) {
         throw new Error('File hoặc loại file không hợp lệ.');
       }
-
       await cloudinary.uploader.upload(file.filepath, {
         resource_type: 'raw',
         public_id: desiredFilename,
@@ -35,55 +30,35 @@ export default async function handler(req, res) {
       if (desiredFilename === 'bao-cao-tuan.xlsx') {
         const workbook = xlsx.readFile(file.filepath);
         const targetSheetName = workbook.SheetNames.filter(name => !/^Sheet\d+$/i.test(name)).pop();
-        if (!targetSheetName) throw new Error('Không tìm thấy sheet báo cáo hợp lệ trong file Excel.');
+        if (!targetSheetName) throw new Error('Không tìm thấy sheet hợp lệ.');
         
         const sheet = workbook.Sheets[targetSheetName];
+        const allData = xlsx.utils.sheet_to_json(sheet, { range: 'A34:Q90', header: 1, defval: '' });
+        if (!allData || allData.length === 0) throw new Error('Không có dữ liệu trong vùng A34:Q90.');
         
-        const tableData = xlsx.utils.sheet_to_json(sheet, { 
-            range: 'A34:Q90', 
-            header: 1,
-            defval: '' 
+        const originalHeaders = allData[0].map(h => String(h || '').trim());
+        const desiredHeaders = ['STT', 'CÔNG VIỆC', 'LÝ TRÌNH', 'ĐƠN VỊ', '% Hoàn thành trong tuần', '% Hoàn thiện theo dự án', 'Ghi chú'];
+        
+        const indicesToKeep = desiredHeaders.map(dh => {
+          const index = originalHeaders.findIndex(oh => oh.toUpperCase() === dh.toUpperCase());
+          if (index === -1) throw new Error(`Không tìm thấy cột bắt buộc: "${dh}"`);
+          return index;
         });
-        
-        if (!tableData || tableData.length === 0) {
-            throw new Error('Không tìm thấy dữ liệu trong vùng A34:Q90. Vui lòng kiểm tra lại file Excel.');
-        }
-        
-        const headers = tableData[0] || [];
-        const rowsAsArrays = tableData.slice(1).filter(row => row.length > 0 && row.some(cell => cell !== null && cell !== ''));
-        
-        const fullSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1 });
-        let conclusion = '';
-        let recommendation = '';
-        fullSheetData.forEach(row => {
-          if (row && typeof row[0] === 'string') {
-            const firstCell = row[0].trim().toUpperCase();
-            if (firstCell.includes('KẾT LUẬN')) conclusion = row[1] || '';
-            if (firstCell.includes('KIẾN NGHỊ')) recommendation = row[1] || '';
-          }
-        });
-        
-        // SỬA LỖI Ở ĐÂY: Viết đầy đủ và chính xác câu lệnh tạo bảng
-        await sql`
-          CREATE TABLE IF NOT EXISTS reports (
-            id SERIAL PRIMARY KEY,
-            headers_data JSONB,
-            report_data JSONB,
-            conclusion TEXT,
-            recommendation TEXT,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-          );
-        `;
 
+        const newRowsAsArrays = allData.slice(1)
+            .filter(row => row.length > 0 && String(row[0] || '').trim() !== '')
+            .map(row => indicesToKeep.map(index => row[index]));
+            
+        await sql`CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, headers_data JSONB, report_data JSONB, conclusion TEXT, recommendation TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`;
+        
         await sql`DELETE FROM reports;`;
         await sql`
           INSERT INTO reports (headers_data, report_data, conclusion, recommendation)
-          VALUES (${JSON.stringify(headers)}, ${JSON.stringify(rowsAsArrays)}, ${conclusion}, ${recommendation});
+          VALUES (${JSON.stringify(desiredHeaders)}, ${JSON.stringify(newRowsAsArrays)}, '', '');
         `;
       }
       
       res.status(200).json({ message: `Tải lên và xử lý thành công file: ${desiredFilename}` });
-
     } catch (error) {
       console.error("Lỗi trong quá trình upload và xử lý:", error);
       res.status(500).json({ error: error.message });
