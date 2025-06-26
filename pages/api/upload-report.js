@@ -1,4 +1,4 @@
-// pages/api/upload-report.js
+// pages/api/upload-report.js (Phiên bản cuối cùng, tự động tìm bảng)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -6,7 +6,6 @@ import { sql } from '@vercel/postgres';
 
 export const config = { api: { bodyParser: false } };
 
-// Cấu hình Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -15,34 +14,51 @@ cloudinary.config({
 
 // Hàm xử lý upload file kế hoạch hợp đồng (PLHD.xlsx)
 async function handleContractUpload(filePath) {
-  console.log("[PLHD-DEBUG] Bắt đầu xử lý file kế hoạch...");
   const workbook = xlsx.readFile(filePath);
-  const sheetName = 'TH'; // Giả sử sheet kế hoạch chính xác tên là 'TH'
+  const sheetName = 'TH';
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) throw new Error(`Không tìm thấy sheet có tên '${sheetName}' trong file PLHD.xlsx`);
   
-  const contractData = xlsx.utils.sheet_to_json(sheet);
-  console.log(`[PLHD-DEBUG] Đã đọc được ${contractData.length} dòng từ sheet '${sheetName}'.`);
+  // --- LOGIC MỚI: TỰ ĐỘNG TÌM ĐÚNG BẢNG DỮ LIỆU ---
+  // Đọc toàn bộ sheet dưới dạng mảng của các mảng
+  const allSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1 });
+  
+  // Tìm chỉ số của dòng tiêu đề (dòng có ô đầu tiên là 'STT')
+  const headerRowIndex = allSheetData.findIndex(row => 
+    String(row[0] || '').trim().toUpperCase() === 'STT'
+  );
 
-  // Log để debug tên cột
-  if (contractData.length > 0) {
-    console.log("[PLHD-DEBUG] Tên các cột đọc được từ file Excel là:", Object.keys(contractData[0]));
+  if (headerRowIndex === -1) {
+    throw new Error("Không tìm thấy dòng tiêu đề (bắt đầu bằng 'STT') trong sheet 'TH'.");
   }
 
-  // Dọn dẹp bảng cũ để đảm bảo dữ liệu luôn mới nhất
+  // Lấy ra dòng tiêu đề và các dòng dữ liệu từ đó trở xuống
+  const headers = allSheetData[headerRowIndex].map(h => String(h || '').trim());
+  const dataRows = allSheetData.slice(headerRowIndex + 1);
+
+  // Chuyển đổi dữ liệu về lại dạng object mà code cũ có thể xử lý
+  const contractData = dataRows.map(row => {
+    let obj = {};
+    headers.forEach((header, index) => {
+      obj[header] = row[index];
+    });
+    return obj;
+  });
+  // --- KẾT THÚC LOGIC MỚI ---
+
   await sql`TRUNCATE TABLE progress_entries, weekly_reports, project_tasks RESTART IDENTITY CASCADE;`;
-  console.log("[PLHD-DEBUG] Đã dọn dẹp các bảng cũ.");
 
   let lastParentId = null;
   let tasksInserted = 0;
 
   for (const item of contractData) {
+    // Bây giờ tên cột sẽ khớp chính xác
     const taskName = item['Hạng mục'];
     const designVolume = item['KL Gói thầu'];
     const unit = item['ĐVT'];
     const stt = String(item['STT'] || '').trim();
 
-    if (!taskName) continue;
+    if (!taskName || !stt) continue; // Bỏ qua các dòng trống
 
     let parentId = null;
     let isGroup = false;
@@ -58,10 +74,13 @@ async function handleContractUpload(filePath) {
       tasksInserted++;
     }
   }
-  console.log(`[PLHD-DEBUG] Đã lưu thành công ${tasksInserted} công việc/nhóm vào database.`);
+  console.log(`[PLHD] Đã lưu thành công ${tasksInserted} công việc/nhóm vào database.`);
+  if (tasksInserted === 0) {
+    throw new Error("Không có công việc nào được lưu từ file PLHD. Vui lòng kiểm tra lại cấu trúc file.");
+  }
 }
 
-// Hàm xử lý upload báo cáo tuần
+// Hàm xử lý upload báo cáo tuần (giữ nguyên, không đổi)
 async function handleWeeklyReportUpload(filePath, fields) {
   const fromDate = fields.fromDate?.[0];
   const toDate = fields.toDate?.[0];
@@ -104,7 +123,7 @@ async function handleWeeklyReportUpload(filePath, fields) {
   }
 }
 
-// Handler chính của API
+// Handler chính của API (giữ nguyên, không đổi)
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const form = formidable({});
