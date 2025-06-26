@@ -1,4 +1,4 @@
-// pages/api/ai-evaluate.js (Phiên bản tối ưu truy vấn song song)
+// pages/api/ai-evaluate.js (Phiên bản siêu tinh gọn để chống timeout)
 import { sql } from '@vercel/postgres';
 import OpenAI from 'openai';
 
@@ -6,67 +6,60 @@ export const config = { runtime: 'edge' };
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Hàm này parse dữ liệu thô thành các object với đầy đủ các cột
-function parseFullReportData(raw_data) {
+// Hàm parse dữ liệu, chỉ lấy các cột cần thiết nhất
+function parseEssentialData(raw_data) {
   if (!raw_data) return [];
-  const allData = raw_data; // Dữ liệu từ Vercel Postgres đã là object
+  const allData = raw_data;
   const headers = allData[0].map(h => String(h || '').trim());
+  const requiredCols = ['CÔNG VIỆC', '% Hoàn thành trong tuần', 'Ghi chú'];
+  const indices = requiredCols.map(rc => headers.findIndex(h => h.toUpperCase() === rc.toUpperCase()));
+  
+  // Nếu thiếu cột quan trọng, trả về mảng rỗng
+  if (indices.some(i => i === -1)) return [];
+
   return allData.slice(1)
     .filter(row => Array.isArray(row) && row.length > 0 && String(row[0] || '').trim() !== '')
-    .map(rowArray => {
-      const obj = {};
-      headers.forEach((header, index) => {
-        const key = header || `column_${index}`;
-        obj[key] = rowArray[index];
-      });
-      return obj;
-    });
+    .map(rowArray => ({
+      'Công việc': rowArray[indices[0]],
+      '% Tuần': rowArray[indices[1]],
+      'Ghi chú': rowArray[indices[2]],
+    }));
 }
 
 export default async function handler(req) {
   try {
-    // --- TỐI ƯU HÓA Ở ĐÂY: Chạy 2 truy vấn database cùng một lúc ---
-    const [reportsResult, contractResult] = await Promise.all([
-      // Truy vấn 1: Lấy 2 báo cáo gần nhất
-      sql`SELECT raw_data FROM reports ORDER BY week_end_date DESC, id DESC LIMIT 2;`,
-      // Truy vấn 2: Lấy kế hoạch hợp đồng
-      sql`SELECT item_name, design_volume FROM contract_items;`
-    ]);
-    // -----------------------------------------------------------
-
+    // Chỉ lấy 2 báo cáo gần nhất, không lấy kế hoạch HĐ để giảm thời gian truy vấn
+    const reportsResult = await sql`
+      SELECT raw_data FROM reports ORDER BY week_end_date DESC, id DESC LIMIT 2;
+    `;
     if (reportsResult.rows.length < 2) {
       return new Response("Cần ít nhất 2 báo cáo tuần để so sánh.", { status: 400 });
     }
 
-    const latestReportData = parseFullReportData(reportsResult.rows[0].raw_data);
-    const previousReportData = parseFullReportData(reportsResult.rows[1].raw_data);
-    const contractPlan = contractResult.rows;
+    const latestReport = parseEssentialData(reportsResult.rows[0].raw_data);
+    const previousReport = parseEssentialData(reportsResult.rows[1].raw_data);
 
-    const comparisonSummary = latestReportData.map(currentItem => {
-      const prevItem = previousReportData.find(p => p['CÔNG VIỆC'] === currentItem['CÔNG VIỆC']);
-      const contractItem = contractPlan.find(c => c.item_name === currentItem['CÔNG VIỆC']);
-      
-      const currentWorkDone = currentItem['Thực hiện'] || 0;
-      const prevWorkDone = prevItem ? prevItem['Thực hiện'] || 0 : 0;
-      const cumulativeProgress = (currentItem['% Hoàn thiện theo dự án'] || 0) * 100;
-      
-      if (currentWorkDone > 0 || currentItem['Ghi chú']) {
-        return `- Công việc: ${currentItem['CÔNG VIỆC']}. Khối lượng tuần này: ${currentWorkDone} (so với ${prevWorkDone} tuần trước). Lũy kế dự án: ${cumulativeProgress.toFixed(1)}%. Ghi chú: ${currentItem['Ghi chú'] || 'Không'}`;
+    // Tạo prompt siêu ngắn gọn
+    const summary = latestReport.map(currentItem => {
+      const prevItem = previousReport.find(p => p['Công việc'] === currentItem['Công việc']);
+      const currentProgress = (currentItem['% Tuần'] || 0) * 100;
+      if (currentProgress > 0 || currentItem['Ghi chú']) {
+        return `- ${currentItem['Công việc']}: Tuần này ${currentProgress.toFixed(0)}%. Ghi chú: ${currentItem['Ghi chú'] || 'Không'}`;
       }
       return null;
     }).filter(Boolean).join('\n');
 
-    if (!comparisonSummary) {
-      return new Response("Không có hoạt động đáng kể nào trong tuần này để phân tích.");
+    if (!summary) {
+      return new Response("Không có hoạt động đáng kể nào để phân tích.");
     }
 
-    const systemPrompt = `Là một trợ lý quản lý dự án cấp cao, hãy phân tích sâu sắc về tiến độ dự án dựa trên dữ liệu so sánh giữa các tuần. Hãy đưa ra nhận định sắc bén, chỉ rõ rủi ro và đề xuất giải pháp chiến lược.`;
-    const userPrompt = `Dưới đây là tóm tắt tiến độ dự án. Hãy phân tích các điểm sau:\n1. **Hiệu suất (Tuần-với-Tuần):** So sánh khối lượng thực hiện. Hiệu suất đang tăng hay giảm? \n2. **So với hợp đồng:** Mức độ hoàn thành lũy kế của các hạng mục có đang đi đúng hướng không?\n3. **Rủi ro:** Dựa vào Ghi chú và các hạng mục có hiệu suất giảm, cảnh báo các rủi ro lớn nhất.\n4. **Hành động:** Đề xuất giải pháp cụ thể để thúc đẩy các hạng mục đang chậm.\n\n### DỮ LIỆU SO SÁNH:\n${comparisonSummary}`;
+    const userPrompt = `Phân tích ngắn gọn tiến độ dự án và đề xuất giải pháp cho các hạng mục sau:\n${summary}`;
 
     const responseStream = await openai.chat.completions.create({
-      model: "gpt-4-turbo",
+      model: "gpt-3.5-turbo", // Dùng model nhanh nhất
       stream: true,
-      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
+      messages: [{ role: "user", content: userPrompt }],
+      temperature: 0.5, // Giảm độ "sáng tạo" để AI trả lời nhanh hơn
     });
 
     const stream = new ReadableStream({
@@ -82,7 +75,7 @@ export default async function handler(req) {
     return new Response(stream);
 
   } catch (error) {
-    console.error('Lỗi trong API AI chuyên sâu:', error);
-    return new Response(JSON.stringify({ error: 'Không thể nhận được phân tích chuyên sâu từ AI.' }), { status: 500 });
+    console.error('Lỗi trong API AI:', error);
+    return new Response(JSON.stringify({ error: 'Không thể nhận được phân tích từ AI.' }), { status: 500 });
   }
 }
