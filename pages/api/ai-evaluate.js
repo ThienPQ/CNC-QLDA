@@ -1,4 +1,4 @@
-// pages/api/ai-evaluate.js (Phiên bản cuối cùng: Chỉ phân tích các hạng mục có Ghi chú)
+// pages/api/ai-evaluate.js (Phiên bản siêu tinh gọn để chống timeout)
 import { sql } from '@vercel/postgres';
 import OpenAI from 'openai';
 
@@ -6,63 +6,60 @@ export const config = { runtime: 'edge' };
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Hàm này parse dữ liệu thô thành các object với đầy đủ các cột
-function parseFullReportData(raw_data) {
+// Hàm parse dữ liệu, chỉ lấy các cột cần thiết nhất
+function parseEssentialData(raw_data) {
   if (!raw_data) return [];
   const allData = raw_data;
   const headers = allData[0].map(h => String(h || '').trim());
+  const requiredCols = ['CÔNG VIỆC', '% Hoàn thành trong tuần', 'Ghi chú'];
+  const indices = requiredCols.map(rc => headers.findIndex(h => h.toUpperCase() === rc.toUpperCase()));
+  
+  // Nếu thiếu cột quan trọng, trả về mảng rỗng
+  if (indices.some(i => i === -1)) return [];
+
   return allData.slice(1)
     .filter(row => Array.isArray(row) && row.length > 0 && String(row[0] || '').trim() !== '')
-    .map(rowArray => {
-      const obj = {};
-      headers.forEach((header, index) => {
-        const key = header || `column_${index}`;
-        obj[key] = rowArray[index];
-      });
-      return obj;
-    });
+    .map(rowArray => ({
+      'Công việc': rowArray[indices[0]],
+      '% Tuần': rowArray[indices[1]],
+      'Ghi chú': rowArray[indices[2]],
+    }));
 }
 
 export default async function handler(req) {
   try {
-    // Tối ưu: Chỉ cần lấy báo cáo mới nhất, không cần so sánh nữa
-    const reportResult = await sql`
-      SELECT raw_data FROM reports ORDER BY week_end_date DESC, id DESC LIMIT 1;
+    // Chỉ lấy 2 báo cáo gần nhất, không lấy kế hoạch HĐ để giảm thời gian truy vấn
+    const reportsResult = await sql`
+      SELECT raw_data FROM reports ORDER BY week_end_date DESC, id DESC LIMIT 2;
     `;
-    if (reportResult.rows.length === 0) {
-      return new Response("Không có dữ liệu báo cáo để phân tích.", { status: 400 });
+    if (reportsResult.rows.length < 2) {
+      return new Response("Cần ít nhất 2 báo cáo tuần để so sánh.", { status: 400 });
     }
 
-    const latestReportData = parseFullReportData(reportResult.rows[0].raw_data);
+    const latestReport = parseEssentialData(reportsResult.rows[0].raw_data);
+    const previousReport = parseEssentialData(reportsResult.rows[1].raw_data);
 
-    // --- LOGIC LỌC MỚI: CHỈ LẤY CÁC HẠNG MỤC CÓ GHI CHÚ ---
-    const itemsWithNotes = latestReportData.filter(
-      item => item['Ghi chú'] && String(item['Ghi chú']).trim() !== ''
-    );
+    // Tạo prompt siêu ngắn gọn
+    const summary = latestReport.map(currentItem => {
+      const prevItem = previousReport.find(p => p['Công việc'] === currentItem['Công việc']);
+      const currentProgress = (currentItem['% Tuần'] || 0) * 100;
+      if (currentProgress > 0 || currentItem['Ghi chú']) {
+        return `- ${currentItem['Công việc']}: Tuần này ${currentProgress.toFixed(0)}%. Ghi chú: ${currentItem['Ghi chú'] || 'Không'}`;
+      }
+      return null;
+    }).filter(Boolean).join('\n');
 
-    if (itemsWithNotes.length === 0) {
-      return new Response("Rất tốt! Không có hạng mục nào có ghi chú cần phân tích trong báo cáo tuần này.");
+    if (!summary) {
+      return new Response("Không có hoạt động đáng kể nào để phân tích.");
     }
 
-    // Tạo prompt siêu ngắn gọn, chỉ tập trung vào các hạng mục có ghi chú
-    const summary = itemsWithNotes.map(item => 
-      `- Công việc: ${item['CÔNG VIỆC']}\n  - Ghi chú: ${item['Ghi chú']}`
-    ).join('\n');
+    const userPrompt = `Phân tích ngắn gọn tiến độ dự án và đề xuất giải pháp cho các hạng mục sau:\n${summary}`;
 
-    const systemPrompt = `Là một giám đốc dự án nhiều kinh nghiệm, nhiệm vụ của bạn là xem xét các vấn đề được ghi chú lại trong báo cáo tuần và đưa ra các giải pháp xử lý cụ thể, khả thi.`;
-    const userPrompt = `
-      Dưới đây là danh sách các hạng mục công việc có ghi chú về vấn đề phát sinh. Hãy phân tích các ghi chú này và đề xuất hành động khắc phục cho từng hạng mục.
-
-      ### CÁC HẠNG MỤC CÓ VẤN ĐỀ:
-      ${summary}
-    `;
-
-    // Gọi AI và trả về kết quả dạng stream
     const responseStream = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo", // Dùng model nhanh và tiết kiệm
+      model: "gpt-3.5-turbo", // Dùng model nhanh nhất
       stream: true,
-      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
-      temperature: 0.5,
+      messages: [{ role: "user", content: userPrompt }],
+      temperature: 0.5, // Giảm độ "sáng tạo" để AI trả lời nhanh hơn
     });
 
     const stream = new ReadableStream({
