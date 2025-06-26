@@ -1,4 +1,4 @@
-// pages/api/upload-report.js (Phiên bản cuối cùng, tự động tìm bảng)
+// pages/api/upload-report.js (Phiên bản cuối cùng, đọc đúng tên cột bạn cung cấp)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -15,72 +15,70 @@ cloudinary.config({
 // Hàm xử lý upload file kế hoạch hợp đồng (PLHD.xlsx)
 async function handleContractUpload(filePath) {
   const workbook = xlsx.readFile(filePath);
-  const sheetName = 'TH';
+  const sheetName = 'Mẫu số 11C';
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) throw new Error(`Không tìm thấy sheet có tên '${sheetName}' trong file PLHD.xlsx`);
-  
-  // --- LOGIC MỚI: TỰ ĐỘNG TÌM ĐÚNG BẢNG DỮ LIỆU ---
-  // Đọc toàn bộ sheet dưới dạng mảng của các mảng
-  const allSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1 });
-  
-  // Tìm chỉ số của dòng tiêu đề (dòng có ô đầu tiên là 'STT')
-  const headerRowIndex = allSheetData.findIndex(row => 
-    String(row[0] || '').trim().toUpperCase() === 'STT'
-  );
 
-  if (headerRowIndex === -1) {
-    throw new Error("Không tìm thấy dòng tiêu đề (bắt đầu bằng 'STT') trong sheet 'TH'.");
-  }
+  const allSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: null });
+  const headerRowIndex = allSheetData.findIndex(row => String(row[0] || '').trim().toUpperCase() === 'STT');
+  if (headerRowIndex === -1) throw new Error("Không tìm thấy dòng tiêu đề (bắt đầu bằng 'STT') trong sheet 'Mẫu số 11C'.");
 
-  // Lấy ra dòng tiêu đề và các dòng dữ liệu từ đó trở xuống
   const headers = allSheetData[headerRowIndex].map(h => String(h || '').trim());
   const dataRows = allSheetData.slice(headerRowIndex + 1);
 
-  // Chuyển đổi dữ liệu về lại dạng object mà code cũ có thể xử lý
+  // Chuyển đổi hàng thành đối tượng để dễ truy cập
   const contractData = dataRows.map(row => {
     let obj = {};
     headers.forEach((header, index) => {
-      obj[header] = row[index];
+      if (header) obj[header] = row[index];
     });
     return obj;
   });
-  // --- KẾT THÚC LOGIC MỚI ---
 
+  // === SỬA LỖI Ở ĐÂY: SỬ DỤNG CHÍNH XÁC TÊN CỘT BẠN CUNG CẤP ===
+  const STT_COL = 'STT';
+  const DESC_COL = 'Mô tả công việc mời thầu';
+  const UNIT_COL = 'Đơn vị tính';
+  const VOLUME_COL = 'Khối lượng';
+  // =============================================================
+
+  // Dọn dẹp database
   await sql`TRUNCATE TABLE progress_entries, weekly_reports, project_tasks RESTART IDENTITY CASCADE;`;
 
-  let lastParentId = null;
+  let lastLevel1Id = null;
+  let lastLevel2Id = null;
   let tasksInserted = 0;
 
   for (const item of contractData) {
-    // Bây giờ tên cột sẽ khớp chính xác
-    const taskName = item['Hạng mục'];
-    const designVolume = item['KL Gói thầu'];
-    const unit = item['ĐVT'];
-    const stt = String(item['STT'] || '').trim();
+    const stt = String(item[STT_COL] || '').trim();
+    const description = item[DESC_COL];
+    
+    // Nếu không có mô tả hoặc STT, bỏ qua dòng
+    if (!description || !stt) continue;
 
-    if (!taskName || !stt) continue; // Bỏ qua các dòng trống
+    const unit = item[UNIT_COL];
+    const volume = item[VOLUME_COL];
 
-    let parentId = null;
-    let isGroup = false;
-
-    if (stt.match(/^[IVXLC]+$/)) { // Là mục La Mã
-      isGroup = true;
-      const result = await sql`INSERT INTO project_tasks (task_name, is_group) VALUES (${taskName}, ${isGroup}) RETURNING id;`;
-      lastParentId = result.rows[0].id;
+    if (stt.match(/^[IVXLC]+$/)) { // Cấp 1
+      const res = await sql`INSERT INTO project_tasks (task_name, is_group, stt) VALUES (${description}, TRUE, ${stt}) RETURNING id;`;
+      lastLevel1Id = res.rows[0].id;
       tasksInserted++;
-    } else { // Là mục con
-      parentId = lastParentId;
-      await sql`INSERT INTO project_tasks (task_name, parent_task_id, design_volume, unit) VALUES (${taskName}, ${parentId}, ${designVolume}, ${unit});`;
+    } else if (stt.match(/^\d+\.\d+$/)) { // Cấp 2
+      const res = await sql`INSERT INTO project_tasks (task_name, parent_id, is_group, stt) VALUES (${description}, ${lastLevel1Id}, TRUE, ${stt}) RETURNING id;`;
+      lastLevel2Id = res.rows[0].id;
+      tasksInserted++;
+    } else if (stt.match(/^\d+\.\d+\.\d+$/)) { // Cấp 3
+      await sql`INSERT INTO project_tasks (task_name, parent_id, contract_volume, unit, stt) VALUES (${description}, ${lastLevel2Id}, ${volume}, ${unit});`;
       tasksInserted++;
     }
   }
-  console.log(`[PLHD] Đã lưu thành công ${tasksInserted} công việc/nhóm vào database.`);
+
   if (tasksInserted === 0) {
-    throw new Error("Không có công việc nào được lưu từ file PLHD. Vui lòng kiểm tra lại cấu trúc file.");
+    throw new Error('Không có công việc nào được lưu từ file PLHD. Đã xảy ra lỗi khi đọc các cột. Vui lòng kiểm tra lại tên cột trong file Excel: "Mô tả công việc mời thầu", "Đơn vị tính", "Khối lượng".');
   }
 }
 
-// Hàm xử lý upload báo cáo tuần (giữ nguyên, không đổi)
+// Hàm xử lý upload báo cáo tuần (không thay đổi)
 async function handleWeeklyReportUpload(filePath, fields) {
   const fromDate = fields.fromDate?.[0];
   const toDate = fields.toDate?.[0];
@@ -94,36 +92,24 @@ async function handleWeeklyReportUpload(filePath, fields) {
   const sheet = workbook.Sheets[targetSheetName];
   const reportData = xlsx.utils.sheet_to_json(sheet, { range: 'A8', defval: '' });
 
-  const reportResult = await sql`
-    INSERT INTO weekly_reports (start_date, end_date)
-    VALUES (${fromDate}, ${toDate})
-    ON CONFLICT (start_date, end_date) DO UPDATE SET end_date = EXCLUDED.end_date
-    RETURNING id;
-  `;
+  const reportResult = await sql`INSERT INTO weekly_reports (start_date, end_date) VALUES (${fromDate}, ${toDate}) ON CONFLICT (start_date, end_date) DO UPDATE SET end_date = EXCLUDED.end_date RETURNING id;`;
   const reportId = reportResult.rows[0].id;
 
   for (const row of reportData) {
     const taskName = row['CÔNG VIỆC'];
     const workDone = row['Thực hiện'];
     const notes = row['Ghi chú'];
-    const stt = String(row['STT'] || '').trim();
-
-    if (taskName && !stt.match(/^[IVXLC]/) && !stt.match(/\./)) {
-      const taskResult = await sql`SELECT id FROM project_tasks WHERE task_name = ${taskName};`;
+    if (taskName) {
+      const taskResult = await sql`SELECT id FROM project_tasks WHERE task_name = ${taskName} AND is_group = FALSE;`;
       if (taskResult.rows.length > 0) {
         const taskId = taskResult.rows[0].id;
-        
-        await sql`
-          INSERT INTO progress_entries (report_id, task_id, work_done_this_week, notes)
-          VALUES (${reportId}, ${taskId}, ${workDone || 0}, ${notes || ''})
-          ON CONFLICT (report_id, task_id) DO UPDATE SET work_done_this_week = EXCLUDED.work_done_this_week, notes = EXCLUDED.notes;
-        `;
+        await sql`INSERT INTO progress_entries (report_id, task_id, work_done_this_week, notes) VALUES (${reportId}, ${taskId}, ${workDone || 0}, ${notes || ''}) ON CONFLICT (report_id, task_id) DO UPDATE SET work_done_this_week = EXCLUDED.work_done_this_week, notes = EXCLUDED.notes;`;
       }
     }
   }
 }
 
-// Handler chính của API (giữ nguyên, không đổi)
+// Handler chính của API (không thay đổi)
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const form = formidable({});
