@@ -1,4 +1,4 @@
-// pages/api/upload-report.js (Phiên bản cuối cùng, đã sửa lỗi INSERT)
+// pages/api/upload-report.js (Phiên bản đầy đủ, cuối cùng)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -6,6 +6,7 @@ import { sql } from '@vercel/postgres';
 
 export const config = { api: { bodyParser: false } };
 
+// Cấu hình Cloudinary đầy đủ
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -60,17 +61,12 @@ async function handleContractUpload(filePath) {
       const res = await sql`INSERT INTO project_tasks (task_name, parent_id, is_group, stt) VALUES (${description}, ${lastLevel1Id}, TRUE, ${stt}) RETURNING id;`;
       lastLevel2Id = res.rows[0].id;
     } else if (stt.match(/^\d+\.\d+\.\d+$/)) {
-      // === SỬA LỖI Ở ĐÂY: Thêm giá trị `stt` vào câu lệnh INSERT ===
-      await sql`
-        INSERT INTO project_tasks (task_name, parent_id, contract_volume, unit, stt) 
-        VALUES (${description}, ${lastLevel2Id}, ${volume}, ${unit}, ${stt});
-      `;
-      // ========================================================
+      await sql`INSERT INTO project_tasks (task_name, parent_id, contract_volume, unit, stt) VALUES (${description}, ${lastLevel2Id}, ${volume}, ${unit}, ${stt});`;
     }
   }
 }
 
-// Hàm xử lý upload báo cáo tuần (không thay đổi)
+// Hàm xử lý upload báo cáo tuần (đầy đủ)
 async function handleWeeklyReportUpload(filePath, fields) {
   const fromDate = fields.fromDate?.[0];
   const toDate = fields.toDate?.[0];
@@ -87,4 +83,48 @@ async function handleWeeklyReportUpload(filePath, fields) {
   const reportResult = await sql`INSERT INTO weekly_reports (start_date, end_date) VALUES (${fromDate}, ${toDate}) ON CONFLICT (start_date, end_date) DO UPDATE SET end_date = EXCLUDED.end_date RETURNING id;`;
   const reportId = reportResult.rows[0].id;
 
-  for (const row of reportData)
+  for (const row of reportData) {
+    const taskName = row['CÔNG VIỆC'];
+    const workDone = row['Thực hiện'];
+    const notes = row['Ghi chú'];
+    if (taskName) {
+      // Tìm task_id trong database dựa trên tên công việc
+      const taskResult = await sql`SELECT id FROM project_tasks WHERE task_name = ${taskName} AND is_group = FALSE;`;
+      if (taskResult.rows.length > 0) {
+        const taskId = taskResult.rows[0].id;
+        // Thêm hoặc cập nhật tiến độ cho công việc này
+        await sql`
+          INSERT INTO progress_entries (report_id, task_id, work_done_this_week, notes)
+          VALUES (${reportId}, ${taskId}, ${workDone || 0}, ${notes || ''})
+          ON CONFLICT (report_id, task_id) DO UPDATE SET work_done_this_week = EXCLUDED.work_done_this_week, notes = EXCLUDED.notes;
+        `;
+      }
+    }
+  }
+}
+
+// Handler chính của API (đầy đủ)
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const form = formidable({});
+  form.parse(req, async (err, fields, files) => {
+    try {
+      const file = files.file?.[0];
+      const desiredFilename = fields.filename?.[0];
+      if (!file || !desiredFilename) throw new Error('File hoặc loại file không hợp lệ.');
+
+      await cloudinary.uploader.upload(file.filepath, { resource_type: 'raw', public_id: desiredFilename, overwrite: true });
+
+      if (desiredFilename === 'PLHD.xlsx') {
+        await handleContractUpload(file.filepath);
+      } else if (desiredFilename === 'bao-cao-tuan.xlsx') {
+        await handleWeeklyReportUpload(file.filepath, fields);
+      }
+      
+      res.status(200).json({ message: `Tải lên và xử lý thành công file: ${desiredFilename}` });
+    } catch (error) {
+      console.error("Lỗi trong quá trình upload và xử lý:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+}
