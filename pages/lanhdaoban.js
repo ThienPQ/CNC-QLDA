@@ -1,6 +1,5 @@
 // pages/lanhdaoban.js
 import { useEffect, useState } from 'react';
-import styles from '../styles/Home.module.css';
 
 export default function LanhDaoBan() {
   const [data, setData] = useState([]);
