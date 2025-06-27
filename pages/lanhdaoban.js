@@ -26,29 +26,27 @@ export default function LanhDaoBan() {
   // Gom nhóm theo hạng mục từ STT (1., 2., 3.)
   const groupedReports = {};
   for (const r of reports) {
-    const sttParts = r.stt.toString().split('.');
-    const hangMuc = sttParts[0];
-    const nhomCongViec = sttParts.length > 1 ? sttParts[0] + '.' + sttParts[1] : null;
+    const normalizedStt = (r.stt || '').replace(/[^0-9.]/g, '');
+    const sttParts = normalizedStt.split('.').filter(Boolean);
+    const hangMuc = sttParts[0] || 'Khác';
+    const nhomCongViec = sttParts.length > 1 ? sttParts[0] + '.' + sttParts[1] : '__root';
 
     if (!groupedReports[hangMuc]) groupedReports[hangMuc] = {};
-    if (nhomCongViec) {
-      if (!groupedReports[hangMuc][nhomCongViec]) groupedReports[hangMuc][nhomCongViec] = [];
-      groupedReports[hangMuc][nhomCongViec].push(r);
-    } else {
-      if (!groupedReports[hangMuc]['__root']) groupedReports[hangMuc]['__root'] = [];
-      groupedReports[hangMuc]['__root'].push(r);
-    }
+    if (!groupedReports[hangMuc][nhomCongViec]) groupedReports[hangMuc][nhomCongViec] = [];
+    groupedReports[hangMuc][nhomCongViec].push(r);
   }
 
   return (
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-4">Báo cáo tuần và đánh giá</h1>
-      {Object.keys(groupedReports).map(hm => (
+      {Object.keys(groupedReports).sort().map(hm => (
         <div key={hm} className="mb-8">
           <h2 className="text-xl font-semibold text-blue-700 mb-2">Hạng mục {hm}</h2>
-          {Object.keys(groupedReports[hm]).map(ncv => (
+          {Object.keys(groupedReports[hm]).sort().map(ncv => (
             <div key={ncv} className="mb-4">
-              {ncv !== '__root' && <h3 className="text-md font-medium text-gray-700 mb-1">Nhóm công việc {ncv}</h3>}
+              {ncv !== '__root' && (
+                <h3 className="text-md font-medium text-gray-700 mb-1">Nhóm công việc {ncv}</h3>
+              )}
               <table className="table-auto w-full border">
                 <thead>
                   <tr className="bg-gray-200">
