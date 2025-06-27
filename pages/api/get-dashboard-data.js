@@ -1,4 +1,4 @@
-// pages/api/get-dashboard-data.js (Phiên bản cuối cùng, sửa lỗi tính toán)
+// pages/api/get-dashboard-data.js (Phiên bản cuối cùng, đã sửa lỗi "cumulative_work_done")
 import { sql } from '@vercel/postgres';
 
 export default async function handler(req, res) {
@@ -23,9 +23,9 @@ export default async function handler(req, res) {
       return res.status(200).json([]);
     }
 
-    // Bước 2: Lấy toàn bộ dữ liệu tiến độ đã được ghi
+    // Bước 2: Lấy toàn bộ lịch sử tiến độ (chỉ cần cột work_done_this_week)
     const progressResult = await sql`
-      SELECT task_id, report_id, work_done_this_week, cumulative_work_done 
+      SELECT task_id, report_id, work_done_this_week 
       FROM progress_entries;
     `;
     
@@ -36,16 +36,16 @@ export default async function handler(req, res) {
     const latestReportId = latestReportResult.rows.length > 0 ? latestReportResult.rows[0].id : null;
 
     // Bước 4: Lấy thông tin các nhóm cha để hiển thị
-    const groupsResult = await sql`SELECT id, task_name FROM project_tasks WHERE is_group = TRUE;`;
+    const groupsResult = await sql`SELECT id, task_name, parent_id FROM project_tasks WHERE is_group = TRUE;`;
     const groupMap = new Map();
-    groupsResult.rows.forEach(group => groupMap.set(group.id, group.task_name));
+    groupsResult.rows.forEach(group => groupMap.set(group.id, group));
 
     // Bước 5: Kết hợp và tính toán dữ liệu bằng JavaScript (đáng tin cậy hơn)
     const dashboardData = tasksResult.rows.map(task => {
       // Tìm tất cả các bản ghi tiến độ cho công việc này
       const allProgressForThisTask = progressResult.rows.filter(p => p.task_id === task.id);
 
-      // Tính tổng khối lượng hoàn thành bằng cách cộng dồn tất cả các tuần
+      // TÍNH TOÁN LẠI LŨY KẾ: Cộng dồn tất cả các tuần lại với nhau
       const totalWorkDone = allProgressForThisTask.reduce((sum, current) => sum + (Number(current.work_done_this_week) || 0), 0);
 
       // Tìm bản ghi tiến độ của tuần mới nhất
@@ -53,18 +53,18 @@ export default async function handler(req, res) {
         ? allProgressForThisTask.find(p => p.report_id === latestReportId) 
         : null;
       
-      // Lấy khối lượng tuần này và % hoàn thành so với hợp đồng
       const workDoneThisWeek = latestProgress?.work_done_this_week || 0;
       const completionPercentage = (task.contract_volume > 0) ? (totalWorkDone / task.contract_volume) : 0;
       
       // Tìm tên nhóm cha và ông
-      const parentTask = task.parent_id ? tasksResult.rows.find(p => p.id === task.parent_id) || groupsResult.rows.find(g => g.id === task.parent_id) : null;
-      const grandParentTask = parentTask?.parent_id ? tasksResult.rows.find(p => p.id === parentTask.parent_id) || groupsResult.rows.find(g => g.id === parentTask.parent_id) : null;
+      const parentGroup = task.parent_id ? groupMap.get(task.parent_id) : null;
+      const grandParentGroup = parentGroup?.parent_id ? groupMap.get(parentGroup.parent_id) : null;
 
       return {
+        id: task.id,
         stt: task.stt,
-        category: grandParentTask?.task_name || '',
-        sub_category: parentTask?.task_name || '',
+        category: grandParentGroup?.task_name || '',
+        sub_category: parentGroup?.task_name || '',
         task_name: task.task_name,
         work_done_this_week: workDoneThisWeek,
         total_work_done: totalWorkDone,
@@ -72,7 +72,7 @@ export default async function handler(req, res) {
       };
     });
     
-    // Chỉ trả về những công việc đã có tiến độ
+    // Chỉ trả về những công việc đã từng có tiến độ
     const finalData = dashboardData.filter(item => item.total_work_done > 0);
 
     res.status(200).json(finalData);
