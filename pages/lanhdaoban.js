@@ -1,68 +1,71 @@
 // pages/lanhdaoban.js
 import { useEffect, useState } from 'react';
+import Head from 'next/head';
+import axios from 'axios';
 
 export default function LanhDaoBan() {
-  const [data, setData] = useState([]);
-  const [grouped, setGrouped] = useState({});
+  const [reports, setReports] = useState([]);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch('/api/get-latest-report')
-      .then(res => res.json())
-      .then(res => {
-        setData(res.rows || []);
-      });
-  }, []);
-
-  useEffect(() => {
-    const group = {};
-    for (const item of data) {
-      const stt = item.stt;
-      if (/^\d+$/.test(stt)) {
-        const parent = Object.keys(group).slice(-1)[0] || 'Khác';
-        group[parent] = group[parent] || [];
-        group[parent].push(item);
-      } else if (/^[IVXLCDM]+$/i.test(stt)) {
-        group[stt] = [];
-      } else {
-        group['Khác'] = group['Khác'] || [];
-        group['Khác'].push(item);
+    async function fetchReports() {
+      try {
+        const response = await axios.get('/api/get-weekly-reports');
+        setReports(response.data);
+      } catch (err) {
+        setError('Không thể tải báo cáo tuần');
       }
     }
-    setGrouped(group);
-  }, [data]);
+    fetchReports();
+  }, []);
 
   return (
-    <div className={styles.container}>
-      <h1>Báo cáo tuần và đánh giá</h1>
-      {Object.entries(grouped).map(([group, items], idx) => (
-        <div key={idx} style={{ marginBottom: '2rem' }}>
-          <h2>Hạng mục {group}</h2>
-          <table border="1" cellPadding="6">
-            <thead>
-              <tr>
-                <th>STT</th>
-                <th>Tên công việc</th>
-                <th>Đơn vị</th>
-                <th>Khối lượng</th>
-                <th>% hoàn thành</th>
-                <th>Ghi chú</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((row, i) => (
-                <tr key={i}>
-                  <td>{row.stt}</td>
-                  <td>{row.task_name}</td>
-                  <td>{row.unit}</td>
-                  <td>{row.volume_total}</td>
-                  <td>{row.percent}</td>
-                  <td>{row.note}</td>
+    <div className="p-4">
+      <Head>
+        <title>Báo cáo tuần và đánh giá</title>
+      </Head>
+
+      <h1 className="text-2xl font-bold mb-4">Báo cáo tuần và đánh giá</h1>
+
+      {error && <p className="text-red-500">{error}</p>}
+
+      {reports.length > 0 ? (
+        reports.map((group, idx) => (
+          <div key={idx} className="mb-8">
+            <h2 className="text-xl font-semibold text-blue-700 mb-2">
+              {group.category || 'Hạng mục chưa xác định'}
+            </h2>
+            <table className="w-full border-collapse border border-gray-300">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="border border-gray-300 px-2 py-1">STT</th>
+                  <th className="border border-gray-300 px-2 py-1">Tên công việc</th>
+                  <th className="border border-gray-300 px-2 py-1">Nhóm công việc</th>
+                  <th className="border border-gray-300 px-2 py-1">Đơn vị</th>
+                  <th className="border border-gray-300 px-2 py-1">Khối lượng</th>
+                  <th className="border border-gray-300 px-2 py-1">% Hoàn thành HĐ</th>
+                  <th className="border border-gray-300 px-2 py-1">Ghi chú</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ))}
+              </thead>
+              <tbody>
+                {group.tasks.map((task, i) => (
+                  <tr key={i}>
+                    <td className="border border-gray-300 px-2 py-1">{task.stt}</td>
+                    <td className="border border-gray-300 px-2 py-1">{task.task_name}</td>
+                    <td className="border border-gray-300 px-2 py-1">{task.group_name || ''}</td>
+                    <td className="border border-gray-300 px-2 py-1">{task.unit}</td>
+                    <td className="border border-gray-300 px-2 py-1">{task.volume_total}</td>
+                    <td className="border border-gray-300 px-2 py-1">{task.percent}</td>
+                    <td className="border border-gray-300 px-2 py-1">{task.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))
+      ) : (
+        <p>Không có dữ liệu báo cáo.</p>
+      )}
     </div>
   );
 }
