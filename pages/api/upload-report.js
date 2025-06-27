@@ -1,4 +1,4 @@
-// pages/api/upload-report.js (Phiên bản cuối cùng, đã sửa lỗi biến 'level2Id')
+// pages/api/upload-report.js (Phiên bản cuối cùng, đọc theo vị trí cột A, B, C, D)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -17,6 +17,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+// Hàm "làm sạch" giá trị số
 const sanitizeNumber = (value) => {
     if (value === null || value === undefined || String(value).trim() === '') return null;
     const number = Number(String(value).replace(/,/g, ''));
@@ -31,56 +32,47 @@ async function handleContractUpload(filePath) {
   if (!sheet) throw new Error(`Không tìm thấy sheet có tên '${sheetName}' trong file PLHD.xlsx`);
 
   const allSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: null });
+  
   const headerRowIndex = allSheetData.findIndex(row => String(row[0] || '').trim().toUpperCase() === 'STT');
   if (headerRowIndex === -1) throw new Error("Không tìm thấy dòng tiêu đề (bắt đầu bằng 'STT') trong sheet 'Mẫu số 11C'.");
 
-  const headers = allSheetData[headerRowIndex].map(h => String(h || '').trim());
   const dataRows = allSheetData.slice(headerRowIndex + 1);
-
-  const sttIdx = 0;
-  const descIdx = headers.findIndex(h => h.toUpperCase().includes('TÊN CÔNG VIỆC'));
-  const unitIdx = headers.findIndex(h => h.toUpperCase() === 'ĐƠN VỊ');
-  const volumeIdx = headers.findIndex(h => h.toUpperCase() === 'KHỐI LƯỢNG');
-  if ([descIdx, unitIdx, volumeIdx].some(i => i === -1)) throw new Error('Thiếu cột bắt buộc: Tên công việc, Đơn vị, Khối lượng.');
-
-  const contractData = dataRows.map(row => ({
-    stt: String(row[sttIdx] || '').trim(),
-    description: String(row[descIdx] || '').trim(),
-    unit: row[unitIdx],
-    volume: sanitizeNumber(row[volumeIdx]),
-  }));
 
   await sql`TRUNCATE TABLE progress_entries, weekly_reports, project_tasks RESTART IDENTITY CASCADE;`;
   
-  // === SỬA LỖI Ở ĐÂY: Dùng tên biến nhất quán ===
-  let lastLevel1Id = null;
-  let lastLevel2Id = null;
-  // ===========================================
-  
+  let level1Id = null;
+  let level2Id = null; // Khai báo nhất quán
   let tasksInserted = 0;
 
-  for (const item of contractData) {
-    if (!item.description || !item.stt) continue;
+  for (const row of dataRows) {
+    // === ĐỌC DỮ LIỆU TRỰC TIẾP TỪ VỊ TRÍ CỘT, KHÔNG CẦN TÊN CỘT ===
+    const stt = String(row[0] || '').trim();         // Cột A (index 0)
+    const description = String(row[1] || '').trim(); // Cột B (index 1)
+    const unit = String(row[2] || '').trim();        // Cột C (index 2)
+    const volume = sanitizeNumber(row[3]);           // Cột D (index 3)
+    // ==============================================================
     
+    if (!description || !stt) continue;
+
     // Logic phân cấp chính xác: A -> I -> 1
-    if (item.stt.match(/^[A-Z]$/)) { 
-      const res = await sql`INSERT INTO project_tasks (task_name, is_group, stt) VALUES (${item.description}, TRUE, ${item.stt}) RETURNING id;`;
-      lastLevel1Id = res.rows[0].id;
-      lastLevel2Id = null; // Reset level 2 khi gặp level 1 mới
+    if (stt.match(/^[A-Z]$/)) { 
+      const res = await sql`INSERT INTO project_tasks (task_name, is_group, stt) VALUES (${description}, TRUE, ${stt}) RETURNING id;`;
+      level1Id = res.rows[0].id;
+      level2Id = null; // Reset level 2 khi gặp level 1 mới
       tasksInserted++;
-    } else if (item.stt.match(/^[IVXLC]+$/)) {
-      const res = await sql`INSERT INTO project_tasks (task_name, parent_id, is_group, stt) VALUES (${item.description}, ${lastLevel1Id}, TRUE, ${item.stt}) RETURNING id;`;
-      lastLevel2Id = res.rows[0].id;
+    } else if (stt.match(/^[IVXLC]+$/)) {
+      const res = await sql`INSERT INTO project_tasks (task_name, parent_id, is_group, stt) VALUES (${description}, ${level1Id}, TRUE, ${stt}) RETURNING id;`;
+      level2Id = res.rows[0].id; // Gán giá trị cho level2Id
       tasksInserted++;
-    } else if (!isNaN(Number(item.stt))) {
-      // Sử dụng biến lastLevel2Id đã được khai báo và gán giá trị ở trên
-      await sql`INSERT INTO project_tasks (task_name, parent_id, contract_volume, unit, stt) VALUES (${item.description}, ${lastLevel2Id}, ${item.volume}, ${item.unit}, ${item.stt});`;
+    } else if (!isNaN(Number(stt))) {
+      // Sử dụng biến level2Id đã được khai báo và gán giá trị ở trên
+      await sql`INSERT INTO project_tasks (task_name, parent_id, contract_volume, unit, stt) VALUES (${description}, ${level2Id}, ${volume}, ${unit}, ${stt});`;
       tasksInserted++;
     }
   }
 
   if (tasksInserted === 0) {
-    throw new Error('Không có công việc nào được lưu từ file PLHD. Vui lòng kiểm tra lại cấu trúc STT (A, I, 1) trong file Excel.');
+    throw new Error('Không có công việc nào được lưu từ file PLHD. Vui lòng kiểm tra lại cấu trúc file và dữ liệu trong 4 cột đầu tiên.');
   }
 }
 
@@ -100,7 +92,7 @@ async function handleWeeklyReportUpload(filePath, fields) {
 
   const headers = data[headerRowIndex].map(h => String(h || '').trim());
   const rows = data.slice(headerRowIndex + 1);
-  
+
   const descIdx = headers.findIndex(h => h.toUpperCase().includes('CÔNG VIỆC'));
   const workDoneIdx = headers.findIndex(h => h.toUpperCase() === 'THỰC HIỆN');
   const cumulativeIdx = headers.findIndex(h => h.toUpperCase().includes('LŨY KẾ'));
@@ -108,7 +100,8 @@ async function handleWeeklyReportUpload(filePath, fields) {
 
   const reportResult = await sql`INSERT INTO weekly_reports (start_date, end_date) VALUES (${fromDate}, ${toDate}) ON CONFLICT (start_date, end_date) DO UPDATE SET end_date = EXCLUDED.end_date RETURNING id;`;
   const reportId = reportResult.rows[0].id;
-
+  
+  let progressInserted = 0;
   for (const row of rows) {
     const taskName = String(row[descIdx] || '').trim();
     const stt = String(row[0] || '').trim();
@@ -118,10 +111,13 @@ async function handleWeeklyReportUpload(filePath, fields) {
         const taskId = taskResult.rows[0].id;
         const workDone = sanitizeNumber(row[workDoneIdx]);
         const cumulativeWorkDone = sanitizeNumber(row[cumulativeIdx]);
-        const notes = row[notesIdx] || '';
-        await sql`INSERT INTO progress_entries (report_id, task_id, work_done_this_week, cumulative_work_done, notes) VALUES (${reportId}, ${taskId}, ${workDone}, ${cumulativeWorkDone}, ${notes}) ON CONFLICT (report_id, task_id) DO UPDATE SET work_done_this_week = EXCLUDED.work_done_this_week, cumulative_work_done = EXCLUDED.cumulative_work_done, notes = EXCLUDED.notes;`;
+        await sql`INSERT INTO progress_entries (report_id, task_id, work_done_this_week, cumulative_work_done, notes) VALUES (${reportId}, ${taskId}, ${workDone}, ${cumulativeWorkDone}, ${row[notesIdx] || ''}) ON CONFLICT (report_id, task_id) DO UPDATE SET work_done_this_week = EXCLUDED.work_done_this_week, cumulative_work_done = EXCLUDED.cumulative_work_done, notes = EXCLUDED.notes;`;
+        progressInserted++;
       }
     }
+  }
+  if (progressInserted === 0) {
+      console.warn("[BCT] Cảnh báo: Không có bản ghi tiến độ nào được lưu. Có thể tên công việc trong báo cáo tuần không khớp với PLHD.");
   }
 }
 
