@@ -28,19 +28,17 @@ export default async function handler(req, res) {
       const xlsx = await import('xlsx');
       const workbook = xlsx.readFile(file.filepath);
 
-      // tìm sheet có chứa "BC tuần" và có tên lớn nhất (mới nhất)
       const sheets = workbook.SheetNames.filter(name =>
         name.toLowerCase().includes('bc tuần')
       );
       if (sheets.length === 0) {
         return res.status(400).json({ error: 'Không có sheet tên "BC tuần..."' });
       }
-      sheets.sort((a, b) => b.localeCompare(a, 'vi')); // chọn mới nhất
+      sheets.sort((a, b) => b.localeCompare(a, 'vi'));
       const sheet = workbook.Sheets[sheets[0]];
 
       const raw = xlsx.utils.sheet_to_json(sheet, { header: 1 });
 
-      // đọc từ dòng A34 đến khi hết bảng
       const data = [];
       for (let i = 33; i < raw.length; i++) {
         const row = raw[i];
@@ -60,12 +58,12 @@ export default async function handler(req, res) {
       for (const item of data) {
         await sql`
           INSERT INTO weekly_reports 
-          (stt, task_name, unit, volume_now, volume_total, percent, note, from_date, to_date)
+          (stt, task_name, unit, volume_now, volume_total, percent, note, from_date, to_date, start_date)
           VALUES (
             ${item.stt}, ${item.task_name}, ${item.unit},
             ${item.volume_now}, ${item.volume_total},
             ${item.percent}, ${item.note},
-            ${fromDate}, ${toDate}
+            ${fromDate}, ${toDate}, ${fromDate}
           );
         `;
       }
