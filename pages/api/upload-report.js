@@ -55,6 +55,11 @@ export default async function handler(req, res) {
         data.push({ stt, task_name, unit, volume_now, volume_total, percent, note });
       }
 
+      // Xóa dữ liệu cũ nếu đã tồn tại trong tuần đó
+      await sql`
+        DELETE FROM weekly_reports WHERE start_date = ${fromDate} AND end_date = ${toDate};
+      `;
+
       for (const item of data) {
         await sql`
           INSERT INTO weekly_reports 
