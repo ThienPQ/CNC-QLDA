@@ -1,4 +1,4 @@
-// pages/api/upload-report.js (Phiên bản cuối cùng, sửa tên cột "Đơn vị tính")
+// pages/api/upload-report.js (Phiên bản cuối cùng, đọc theo vị trí cột A, B, C, D)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -35,55 +35,33 @@ async function handleContractUpload(filePath) {
   const headerRowIndex = allSheetData.findIndex(row => String(row[0] || '').trim().toUpperCase() === 'STT');
   if (headerRowIndex === -1) throw new Error("Không tìm thấy dòng tiêu đề (bắt đầu bằng 'STT') trong sheet 'Mẫu số 11C'.");
 
-  const headers = allSheetData[headerRowIndex].map(h => String(h || '').trim());
   const dataRows = allSheetData.slice(headerRowIndex + 1);
 
-  const contractData = dataRows.map(row => {
-    let obj = {};
-    headers.forEach((header, index) => {
-      if (header) obj[header] = row[index];
-    });
-    return obj;
-  });
-
-  // === SỬ DỤNG TÊN CỘT CHÍNH XÁC TUYỆT ĐỐI BẠN ĐÃ CUNG CẤP ===
-  const STT_COL = 'STT';
-  const DESC_COL = 'Mô tả công việc'; 
-  const UNIT_COL = 'Đơn vị tính'; // TÊN CỘT ĐÚNG
-  const VOLUME_COL = 'Khối lượng';
-  // =============================================================
-
-  // Kiểm tra lại một lần cuối xem các cột có thực sự tồn tại không
-  const firstRow = contractData[0] || {};
-  if (!(DESC_COL in firstRow) || !(UNIT_COL in firstRow) || !(VOLUME_COL in firstRow)) {
-      throw new Error(`Thiếu cột bắt buộc. Các cột đọc được là: [${Object.keys(firstRow).join(', ')}]`);
-  }
-  
   await sql`TRUNCATE TABLE progress_entries, weekly_reports, project_tasks RESTART IDENTITY CASCADE;`;
   
   let lastLevel1Id = null;
   let lastLevel2Id = null;
   let tasksInserted = 0;
 
-  for (const item of contractData) {
-    const stt = String(item[STT_COL] || '').trim();
-    const description = item[DESC_COL];
+  for (const row of dataRows) {
+    // === ĐỌC DỮ LIỆU TRỰC TIẾP TỪ VỊ TRÍ CỘT ===
+    const stt = String(row[0] || '').trim();         // Cột A (index 0)
+    const description = String(row[1] || '').trim(); // Cột B (index 1)
+    const unit = String(row[2] || '').trim();        // Cột C (index 2)
+    const volume = sanitizeNumber(row[3]);           // Cột D (index 3)
+    // ===========================================
     
     if (!description || !stt) continue;
 
-    const unit = item[UNIT_COL];
-    const volume = sanitizeNumber(item[VOLUME_COL]);
-    
-    // Logic phân cấp chính xác: A -> I -> 1
-    if (stt.match(/^[A-Z]$/)) { 
+    if (stt.match(/^[A-Z]$/)) { // Cấp 1
       const res = await sql`INSERT INTO project_tasks (task_name, is_group, stt) VALUES (${description}, TRUE, ${stt}) RETURNING id;`;
       level1Id = res.rows[0].id;
       tasksInserted++;
-    } else if (stt.match(/^[IVXLC]+$/)) {
+    } else if (stt.match(/^[IVXLC]+$/)) { // Cấp 2
       const res = await sql`INSERT INTO project_tasks (task_name, parent_id, is_group, stt) VALUES (${description}, ${level1Id}, TRUE, ${stt}) RETURNING id;`;
       level2Id = res.rows[0].id;
       tasksInserted++;
-    } else if (!isNaN(Number(stt))) {
+    } else if (!isNaN(Number(stt))) { // Cấp 3
       await sql`INSERT INTO project_tasks (task_name, parent_id, contract_volume, unit, stt) VALUES (${description}, ${level2Id}, ${volume}, ${unit}, ${stt});`;
       tasksInserted++;
     }
@@ -138,7 +116,9 @@ async function handleWeeklyReportUpload(filePath, fields) {
 // Handler chính của API
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  
   const form = formidable({});
+  
   form.parse(req, async (err, fields, files) => {
     try {
       const file = files.file?.[0];
