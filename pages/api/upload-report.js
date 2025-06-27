@@ -34,8 +34,8 @@ export default async function handler(req, res) {
     console.log('Files:', files);
 
     const file = files.file;
-    const startDate = fields.startDate;
-    const endDate = fields.endDate;
+    const startDate = fields.startDate || fields.fromDate;
+    const endDate = fields.endDate || fields.toDate;
 
     if (!file || !startDate || !endDate) {
       return res.status(400).json({ message: 'Thiếu dữ liệu đầu vào (file, startDate, endDate)' });
