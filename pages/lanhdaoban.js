@@ -1,78 +1,67 @@
 // pages/lanhdaoban.js
 import { useEffect, useState } from 'react';
+import styles from '../styles/Home.module.css';
 
 export default function LanhDaoBan() {
-  const [reports, setReports] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState([]);
+  const [grouped, setGrouped] = useState({});
 
   useEffect(() => {
-    async function fetchReports() {
-      try {
-        const res = await fetch('/api/get-weekly-reports');
-        const data = await res.json();
-        setReports(data);
-      } catch (e) {
-        console.error('Lỗi khi tải báo cáo:', e);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchReports();
+    fetch('/api/get-latest-report')
+      .then(res => res.json())
+      .then(res => {
+        setData(res.rows || []);
+      });
   }, []);
 
-  if (loading) return <p>Đang tải dữ liệu...</p>;
-
-  // Gom nhóm theo hạng mục từ STT (1., 2., 3.)
-  const groupedReports = {};
-  for (const r of reports) {
-    const normalizedStt = (r.stt || '').replace(/[^0-9.]/g, '');
-    const sttParts = normalizedStt.split('.').filter(Boolean);
-    const hangMuc = sttParts[0] || 'Khác';
-    const nhomCongViec = sttParts.length > 1 ? sttParts[0] + '.' + sttParts[1] : '__root';
-
-    if (!groupedReports[hangMuc]) groupedReports[hangMuc] = {};
-    if (!groupedReports[hangMuc][nhomCongViec]) groupedReports[hangMuc][nhomCongViec] = [];
-    groupedReports[hangMuc][nhomCongViec].push(r);
-  }
+  useEffect(() => {
+    const group = {};
+    for (const item of data) {
+      const stt = item.stt;
+      if (/^\d+$/.test(stt)) {
+        const parent = Object.keys(group).slice(-1)[0] || 'Khác';
+        group[parent] = group[parent] || [];
+        group[parent].push(item);
+      } else if (/^[IVXLCDM]+$/i.test(stt)) {
+        group[stt] = [];
+      } else {
+        group['Khác'] = group['Khác'] || [];
+        group['Khác'].push(item);
+      }
+    }
+    setGrouped(group);
+  }, [data]);
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Báo cáo tuần và đánh giá</h1>
-      {Object.keys(groupedReports).sort().map(hm => (
-        <div key={hm} className="mb-8">
-          <h2 className="text-xl font-semibold text-blue-700 mb-2">Hạng mục {hm}</h2>
-          {Object.keys(groupedReports[hm]).sort().map(ncv => (
-            <div key={ncv} className="mb-4">
-              {ncv !== '__root' && (
-                <h3 className="text-md font-medium text-gray-700 mb-1">Nhóm công việc {ncv}</h3>
-              )}
-              <table className="table-auto w-full border">
-                <thead>
-                  <tr className="bg-gray-200">
-                    <th className="border px-2 py-1">STT</th>
-                    <th className="border px-2 py-1">Tên công việc</th>
-                    <th className="border px-2 py-1">Đơn vị</th>
-                    <th className="border px-2 py-1">Khối lượng</th>
-                    <th className="border px-2 py-1">% hoàn thành</th>
-                    <th className="border px-2 py-1">Ghi chú</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {groupedReports[hm][ncv].map((r, i) => (
-                    <tr key={i}>
-                      <td className="border px-2 py-1">{r.stt}</td>
-                      <td className="border px-2 py-1">{r.task_name}</td>
-                      <td className="border px-2 py-1">{r.unit}</td>
-                      <td className="border px-2 py-1">{r.volume_total}</td>
-                      <td className="border px-2 py-1">{r.percent}%</td>
-                      <td className="border px-2 py-1">{r.note}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
+    <div className={styles.container}>
+      <h1>Báo cáo tuần và đánh giá</h1>
+      {Object.entries(grouped).map(([group, items], idx) => (
+        <div key={idx} style={{ marginBottom: '2rem' }}>
+          <h2>Hạng mục {group}</h2>
+          <table border="1" cellPadding="6">
+            <thead>
+              <tr>
+                <th>STT</th>
+                <th>Tên công việc</th>
+                <th>Đơn vị</th>
+                <th>Khối lượng</th>
+                <th>% hoàn thành</th>
+                <th>Ghi chú</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((row, i) => (
+                <tr key={i}>
+                  <td>{row.stt}</td>
+                  <td>{row.task_name}</td>
+                  <td>{row.unit}</td>
+                  <td>{row.volume_total}</td>
+                  <td>{row.percent}</td>
+                  <td>{row.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ))}
     </div>
