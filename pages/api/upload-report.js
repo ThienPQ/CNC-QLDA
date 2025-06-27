@@ -60,17 +60,22 @@ export default async function handler(req, res) {
         DELETE FROM weekly_reports WHERE start_date = ${fromDate} AND end_date = ${toDate};
       `;
 
+      // Chèn dữ liệu mới
       for (const item of data) {
-        await sql`
-          INSERT INTO weekly_reports 
-          (stt, task_name, unit, volume_now, volume_total, percent, note, from_date, to_date, start_date, end_date)
-          VALUES (
-            ${item.stt}, ${item.task_name}, ${item.unit},
-            ${item.volume_now}, ${item.volume_total},
-            ${item.percent}, ${item.note},
-            ${fromDate}, ${toDate}, ${fromDate}, ${toDate}
-          );
-        `;
+        try {
+          await sql`
+            INSERT INTO weekly_reports 
+            (stt, task_name, unit, volume_now, volume_total, percent, note, from_date, to_date, start_date, end_date)
+            VALUES (
+              ${item.stt}, ${item.task_name}, ${item.unit},
+              ${item.volume_now}, ${item.volume_total},
+              ${item.percent}, ${item.note},
+              ${fromDate}, ${toDate}, ${fromDate}, ${toDate}
+            );
+          `;
+        } catch (insertErr) {
+          console.error("Lỗi khi insert dòng:", item, insertErr.message);
+        }
       }
 
       res.status(200).json({ message: 'Lưu báo cáo tuần thành công', sheet: sheets[0] });
