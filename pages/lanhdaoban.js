@@ -26,9 +26,9 @@ export default function LanhDaoBan() {
   // Gom nhóm theo hạng mục từ STT (1., 2., 3.)
   const groupedReports = {};
   for (const r of reports) {
-    const hạngMục = r.stt.toString().split('.')[0];
-    if (!groupedReports[hãngMục]) groupedReports[hãngMục] = [];
-    groupedReports[hãngMục].push(r);
+    const hangMuc = r.stt.toString().split('.')[0];
+    if (!groupedReports[hangMuc]) groupedReports[hangMuc] = [];
+    groupedReports[hangMuc].push(r);
   }
 
   return (
