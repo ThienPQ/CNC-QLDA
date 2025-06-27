@@ -1,4 +1,4 @@
-// pages/api/upload-report.js (Phiên bản cuối cùng, đã sửa lỗi 'sanitizeNumber is not defined')
+// pages/api/upload-report.js (Phiên bản cuối cùng, đã sửa lỗi 'sanitizeNumber is not defined' triệt để)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -109,8 +109,8 @@ async function handleWeeklyReportUpload(filePath, fields) {
 
   for (const row of reportData) {
     const taskName = row['CÔNG VIỆC'] || row['Hạng mục công việc'];
-    const workDone = sanitizeNumber(row['Thực hiện']);
-    const cumulativeWorkDone = sanitizeNumber(row['Lũy kế đến nay']);
+    const workDone = sanitizeNumber(row['Thực hiện']); // <-- Sử dụng hàm làm sạch
+    const cumulativeWorkDone = sanitizeNumber(row['Lũy kế đến nay']); // <-- Sử dụng hàm làm sạch
     const notes = row['Ghi chú'];
     if (taskName) {
       const taskResult = await sql`SELECT id FROM project_tasks WHERE task_name = ${taskName} AND is_group = FALSE;`;
