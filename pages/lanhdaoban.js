@@ -1,109 +1,68 @@
+// pages/lanhdaoban.js
 import { useEffect, useState } from 'react';
-import axios from 'axios';
-import ReactMarkdown from 'react-markdown';
-import Head from 'next/head';
 
-export default function LanhDaoBanDashboard() {
-  const [dashboardData, setDashboardData] = useState([]);
+export default function LanhDaoBan() {
+  const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiResult, setAiResult] = useState('');
-  const [aiError, setAiError] = useState('');
-
-  const triggerAIAnalysis = async () => {
-    setIsAiLoading(true);
-    setAiResult('');
-    setAiError('');
-    try {
-      const response = await fetch('/api/ai-evaluate-v2', { method: 'POST' });
-      if (!response.body) throw new Error("Response body is null");
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Lỗi không xác định.');
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        setAiResult((prev) => prev + decoder.decode(value));
-      }
-    } catch (error) { setAiError(error.message); } 
-    finally { setIsAiLoading(false); }
-  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      setError('');
+    async function fetchReports() {
       try {
-        const res = await axios.get('/api/get-dashboard-data');
-        setDashboardData(res.data);
-        if (res.data.length > 0) {
-          triggerAIAnalysis();
-        }
-      } catch (err) {
-        setError(err.response?.data?.error || 'Không thể tải dữ liệu dashboard.');
+        const res = await fetch('/api/get-weekly-reports');
+        const data = await res.json();
+        setReports(data);
+      } catch (e) {
+        console.error('Lỗi khi tải báo cáo:', e);
       } finally {
         setLoading(false);
       }
-    };
-    fetchData();
+    }
+
+    fetchReports();
   }, []);
 
+  if (loading) return <p>Đang tải dữ liệu...</p>;
+
+  // Gom nhóm theo hạng mục từ STT (1., 2., 3.)
+  const groupedReports = {};
+  for (const r of reports) {
+    const hạngMục = r.stt.toString().split('.')[0];
+    if (!groupedReports[hãngMục]) groupedReports[hãngMục] = [];
+    groupedReports[hãngMục].push(r);
+  }
+
   return (
-    <>
-      <Head><title>Dashboard Quản Lý Tiến Độ</title></Head>
-      <div className="p-4 sm:p-6 lg:p-8 font-sans bg-gray-50 min-h-screen">
-        <div className="max-w-screen-2xl mx-auto">
-          <h1 className="text-3xl font-bold text-gray-800 mb-6">Dashboard Quản Lý Tiến Độ Dự Án</h1>
-          {loading && <p className="text-center text-gray-600">Đang tổng hợp và tính toán dữ liệu...</p>}
-          {error && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4" role="alert"><p>{error}</p></div>}
-          
-          {!loading && !error && (
-            <div className="space-y-8">
-              <div className="overflow-x-auto shadow-md rounded-lg">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">STT</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Tên công việc</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">KL hoàn thành tuần này</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Tổng KL hoàn thành</th>
-                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Tỷ lệ HT so với HĐ</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {dashboardData.map((item, index) => (
-                      <tr key={item.id || index} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm text-gray-700">{index + 1}</td>
-                        <td className="px-4 py-3 text-sm text-gray-800 font-medium">
-                          <div className="text-gray-500 text-xs">{item.category}{item.sub_category ? ` > ${item.sub_category}` : ''}</div>
-                          <div>{item.task_name}</div>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-700 text-right">{(Number(item.work_done_this_week) || 0).toFixed(1)}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700 text-right">{(Number(item.total_work_done) || 0).toFixed(1)}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700 text-right font-semibold">{`${(item.completion_percentage * 100).toFixed(1)}%`}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="mt-4">
-                {isAiLoading && !aiResult && <p className="text-gray-600">AI đang phân tích dữ liệu lịch sử...</p>}
-                {aiError && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4" role="alert">Lỗi AI: {aiError}</div>}
-                {aiResult && (
-                  <div className="p-5 mt-2 border bg-white rounded-lg shadow-sm prose max-w-none">
-                    <h3 className="font-bold text-lg text-gray-800">Phân Tích & Đánh Giá Tự Động:</h3>
-                    <div className="text-gray-700"><ReactMarkdown>{aiResult}</ReactMarkdown></div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-4">Báo cáo tuần và đánh giá</h1>
+      {Object.keys(groupedReports).map(key => (
+        <div key={key} className="mb-6">
+          <h2 className="text-xl font-semibold text-blue-700 mb-2">Hạng mục {key}</h2>
+          <table className="table-auto w-full border">
+            <thead>
+              <tr className="bg-gray-200">
+                <th className="border px-2 py-1">STT</th>
+                <th className="border px-2 py-1">Tên công việc</th>
+                <th className="border px-2 py-1">Đơn vị</th>
+                <th className="border px-2 py-1">Khối lượng</th>
+                <th className="border px-2 py-1">% hoàn thành</th>
+                <th className="border px-2 py-1">Ghi chú</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groupedReports[key].map((r, i) => (
+                <tr key={i}>
+                  <td className="border px-2 py-1">{r.stt}</td>
+                  <td className="border px-2 py-1">{r.task_name}</td>
+                  <td className="border px-2 py-1">{r.unit}</td>
+                  <td className="border px-2 py-1">{r.volume_total}</td>
+                  <td className="border px-2 py-1">{r.percent}%</td>
+                  <td className="border px-2 py-1">{r.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </div>
-    </>
+      ))}
+    </div>
   );
 }
