@@ -30,9 +30,6 @@ export default async function handler(req, res) {
       return res.status(500).json({ message: 'Lỗi xử lý tệp' });
     }
 
-    console.log('Fields:', fields);
-    console.log('Files:', files);
-
     const file = files.file;
     const startDate = fields.startDate || fields.fromDate;
     const endDate = fields.endDate || fields.toDate;
@@ -76,19 +73,28 @@ export default async function handler(req, res) {
 
     try {
       for (const row of rows) {
-        await sql`
-          INSERT INTO weekly_reports (stt, task_name, unit, volume_total, percent, note, start_date, end_date, created_at)
-          VALUES (${row.stt}, ${row.task_name}, ${row.unit}, ${row.volume_total}, ${row.percent}, ${row.note}, ${row.start_date}, ${row.end_date}, ${row.created_at})
-          ON CONFLICT (start_date, end_date, stt) DO UPDATE
-          SET task_name = EXCLUDED.task_name,
-              unit = EXCLUDED.unit,
-              volume_total = EXCLUDED.volume_total,
-              percent = EXCLUDED.percent,
-              note = EXCLUDED.note,
-              created_at = EXCLUDED.created_at;
+        const existing = await sql`
+          SELECT 1 FROM weekly_reports
+          WHERE stt = ${row.stt} AND start_date = ${row.start_date} AND end_date = ${row.end_date}
+          LIMIT 1
         `;
+
+        if (existing.rows.length === 0) {
+          await sql`
+            INSERT INTO weekly_reports (stt, task_name, unit, volume_total, percent, note, start_date, end_date, created_at)
+            VALUES (${row.stt}, ${row.task_name}, ${row.unit}, ${row.volume_total}, ${row.percent}, ${row.note}, ${row.start_date}, ${row.end_date}, ${row.created_at})
+          `;
+        } else {
+          await sql`
+            UPDATE weekly_reports
+            SET task_name = ${row.task_name}, unit = ${row.unit}, volume_total = ${row.volume_total},
+                percent = ${row.percent}, note = ${row.note}, created_at = ${row.created_at}
+            WHERE stt = ${row.stt} AND start_date = ${row.start_date} AND end_date = ${row.end_date}
+          `;
+          console.log(`Đã cập nhật công việc STT=${row.stt} trong báo cáo tuần ${row.start_date} đến ${row.end_date}`);
+        }
       }
-      return res.status(200).json({ message: 'Đã lưu báo cáo tuần' });
+      return res.status(200).json({ message: 'Đã lưu hoặc cập nhật báo cáo tuần thành công' });
     } catch (e) {
       console.error('Lỗi khi ghi CSDL:', e);
       return res.status(500).json({ message: 'Lỗi ghi cơ sở dữ liệu' });
