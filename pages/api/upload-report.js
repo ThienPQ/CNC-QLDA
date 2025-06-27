@@ -16,22 +16,22 @@ async function handleContractUpload(filePath) {
   const workbook = xlsx.readFile(filePath);
   const sheetName = 'Mẫu số 11C';
   const sheet = workbook.Sheets[sheetName];
-  if (!sheet) throw new Error(`Không tìm thấy sheet '${sheetName}' trong PLHD.xlsx`);
+  if (!sheet) throw new Error(`Không tìm thấy sheet có tên '${sheetName}' trong file PLHD.xlsx`);
 
-  const data = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: null });
-  const headerRowIndex = data.findIndex(r => String(r[0] || '').trim().toUpperCase() === 'STT');
-  if (headerRowIndex === -1) throw new Error("Không tìm thấy dòng tiêu đề 'STT' trong 'Mẫu số 11C'.");
+  const allSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: null });
+  const headerRowIndex = allSheetData.findIndex(row => String(row[0] || '').trim().toUpperCase() === 'STT');
+  if (headerRowIndex === -1) throw new Error("Không tìm thấy dòng tiêu đề (bắt đầu bằng 'STT') trong sheet 'Mẫu số 11C'.");
 
-  const headers = data[headerRowIndex].map(h => String(h || '').trim());
-  const rows = data.slice(headerRowIndex + 1);
+  const headers = allSheetData[headerRowIndex].map(h => String(h || '').trim());
+  const dataRows = allSheetData.slice(headerRowIndex + 1);
 
-  const sttIdx = 0;
+  const sttIdx = headers.findIndex(h => h.toUpperCase() === 'STT');
   const descIdx = headers.findIndex(h => h.toUpperCase().includes('TÊN CÔNG VIỆC'));
   const unitIdx = headers.findIndex(h => h.toUpperCase() === 'ĐƠN VỊ');
   const volumeIdx = headers.findIndex(h => h.toUpperCase() === 'KHỐI LƯỢNG');
-  if ([descIdx, unitIdx, volumeIdx].some(i => i === -1)) throw new Error('Thiếu cột bắt buộc trong PLHD.xlsx (Tên công việc, Đơn vị, Khối lượng)');
+  if ([sttIdx, descIdx, unitIdx, volumeIdx].some(i => i === -1)) throw new Error('Thiếu cột bắt buộc: STT, Tên công việc, Đơn vị, Khối lượng.');
 
-  const contractData = rows.map(row => ({
+  const contractData = dataRows.map(row => ({
     stt: String(row[sttIdx] || '').trim(),
     description: row[descIdx],
     unit: row[unitIdx],
@@ -40,22 +40,20 @@ async function handleContractUpload(filePath) {
 
   await sql`TRUNCATE TABLE progress_entries, weekly_reports, project_tasks RESTART IDENTITY CASCADE;`;
   
-  let level1Id = null, level2Id = null, tasksInserted = 0;
+  let lastLevel1Id = null, level2Id = null;
   for (const item of contractData) {
     if (!item.description || !item.stt) continue;
     
-    if (item.stt.match(/^[A-Z]$/)) { // Cấp 1: A, B, C...
+    if (item.stt.match(/^[A-Z]$/)) {
       const res = await sql`INSERT INTO project_tasks (task_name, is_group, stt) VALUES (${item.description}, TRUE, ${item.stt}) RETURNING id;`;
-      level1Id = res.rows[0].id; tasksInserted++;
-    } else if (item.stt.match(/^[IVXLC]+$/)) { // Cấp 2: I, II...
+      level1Id = res.rows[0].id;
+    } else if (item.stt.match(/^[IVXLC]+$/)) {
       const res = await sql`INSERT INTO project_tasks (task_name, parent_id, is_group, stt) VALUES (${item.description}, ${level1Id}, TRUE, ${item.stt}) RETURNING id;`;
-      level2Id = res.rows[0].id; tasksInserted++;
-    } else if (!isNaN(Number(item.stt))) { // Cấp 3: 1, 2...
+      level2Id = res.rows[0].id;
+    } else if (!isNaN(Number(item.stt))) {
       await sql`INSERT INTO project_tasks (task_name, parent_id, contract_volume, unit, stt) VALUES (${item.description}, ${level2Id}, ${item.volume}, ${item.unit}, ${item.stt});`;
-      tasksInserted++;
     }
   }
-  if (tasksInserted === 0) throw new Error('Không có công việc nào được lưu từ file PLHD. Vui lòng kiểm tra lại cấu trúc STT (A, I, 1) và tên các cột trong file Excel.');
 }
 
 async function handleWeeklyReportUpload(filePath, fields) {
@@ -73,7 +71,7 @@ async function handleWeeklyReportUpload(filePath, fields) {
 
   const headers = data[headerRowIndex].map(h => String(h || '').trim());
   const rows = data.slice(headerRowIndex + 1);
-  
+
   const descIdx = headers.findIndex(h => h.toUpperCase().includes('CÔNG VIỆC'));
   const workDoneIdx = headers.findIndex(h => h === 'Thực hiện');
   const cumulativeIdx = headers.findIndex(h => h.includes('Lũy kế'));
