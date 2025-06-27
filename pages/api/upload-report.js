@@ -1,11 +1,16 @@
-// pages/api/upload-report.js (Phiên bản cuối cùng, sửa lỗi không lưu tiến độ)
+// pages/api/upload-report.js (Phiên bản cuối cùng, sửa tên cột "Đơn vị tính")
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
 import { sql } from '@vercel/postgres';
 
-export const config = { api: { bodyParser: false } };
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
 
+// Cấu hình Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -13,55 +18,83 @@ cloudinary.config({
 });
 
 const sanitizeNumber = (value) => {
-  if (value === null || value === undefined || String(value).trim() === '') return null;
-  const number = Number(String(value).replace(/,/g, ''));
-  return isNaN(number) ? null : number;
+    if (value === null || value === undefined || String(value).trim() === '') return null;
+    const number = Number(String(value).replace(/,/g, ''));
+    return isNaN(number) ? null : number;
 };
 
-// Hàm xử lý PLHD.xlsx với logic làm sạch tên công việc
+// Hàm xử lý upload file kế hoạch hợp đồng (PLHD.xlsx)
 async function handleContractUpload(filePath) {
   const workbook = xlsx.readFile(filePath);
   const sheetName = 'Mẫu số 11C';
   const sheet = workbook.Sheets[sheetName];
-  if (!sheet) throw new Error(`Không tìm thấy sheet '${sheetName}' trong PLHD.xlsx`);
+  if (!sheet) throw new Error(`Không tìm thấy sheet có tên '${sheetName}' trong file PLHD.xlsx`);
 
-  const data = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: null });
-  const headerRowIndex = data.findIndex(r => String(r[0] || '').trim().toUpperCase() === 'STT');
-  if (headerRowIndex === -1) throw new Error("Không tìm thấy dòng tiêu đề 'STT' trong 'Mẫu số 11C'.");
+  const allSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: null });
+
+  const headerRowIndex = allSheetData.findIndex(row => String(row[0] || '').trim().toUpperCase() === 'STT');
+  if (headerRowIndex === -1) throw new Error("Không tìm thấy dòng tiêu đề (bắt đầu bằng 'STT') trong sheet 'Mẫu số 11C'.");
+
+  const headers = allSheetData[headerRowIndex].map(h => String(h || '').trim());
+  const dataRows = allSheetData.slice(headerRowIndex + 1);
+
+  const contractData = dataRows.map(row => {
+    let obj = {};
+    headers.forEach((header, index) => {
+      if (header) obj[header] = row[index];
+    });
+    return obj;
+  });
+
+  // === SỬ DỤNG TÊN CỘT CHÍNH XÁC TUYỆT ĐỐI BẠN ĐÃ CUNG CẤP ===
+  const STT_COL = 'STT';
+  const DESC_COL = 'Mô tả công việc'; 
+  const UNIT_COL = 'Đơn vị tính'; // TÊN CỘT ĐÚNG
+  const VOLUME_COL = 'Khối lượng';
+  // =============================================================
+
+  // Kiểm tra lại một lần cuối xem các cột có thực sự tồn tại không
+  const firstRow = contractData[0] || {};
+  if (!(DESC_COL in firstRow) || !(UNIT_COL in firstRow) || !(VOLUME_COL in firstRow)) {
+      throw new Error(`Thiếu cột bắt buộc. Các cột đọc được là: [${Object.keys(firstRow).join(', ')}]`);
+  }
   
-  const headers = data[headerRowIndex].map(h => String(h || '').trim());
-  const rows = data.slice(headerRowIndex + 1);
-
-  const sttIdx = 0;
-  const descIdx = headers.findIndex(h => h.toUpperCase().includes('TÊN CÔNG VIỆC'));
-  const unitIdx = headers.findIndex(h => h.toUpperCase() === 'ĐƠN VỊ');
-  const volumeIdx = headers.findIndex(h => h.toUpperCase() === 'KHỐI LƯỢNG');
-  if ([descIdx, unitIdx, volumeIdx].some(i => i === -1)) throw new Error('Thiếu cột bắt buộc trong PLHD.xlsx (Tên công việc, Đơn vị, Khối lượng)');
-
   await sql`TRUNCATE TABLE progress_entries, weekly_reports, project_tasks RESTART IDENTITY CASCADE;`;
   
-  let level1Id = null, level2Id = null;
-  for (const row of rows) {
-    const stt = String(row[sttIdx] || '').trim();
-    const description = String(row[descIdx] || '').trim(); // <-- LÀM SẠCH TÊN CÔNG VIỆC
+  let lastLevel1Id = null;
+  let lastLevel2Id = null;
+  let tasksInserted = 0;
+
+  for (const item of contractData) {
+    const stt = String(item[STT_COL] || '').trim();
+    const description = item[DESC_COL];
+    
     if (!description || !stt) continue;
 
-    const unit = row[unitIdx];
-    const volume = sanitizeNumber(row[volumeIdx]);
+    const unit = item[UNIT_COL];
+    const volume = sanitizeNumber(item[VOLUME_COL]);
     
-    if (stt.match(/^[A-Z]$/)) {
+    // Logic phân cấp chính xác: A -> I -> 1
+    if (stt.match(/^[A-Z]$/)) { 
       const res = await sql`INSERT INTO project_tasks (task_name, is_group, stt) VALUES (${description}, TRUE, ${stt}) RETURNING id;`;
       level1Id = res.rows[0].id;
+      tasksInserted++;
     } else if (stt.match(/^[IVXLC]+$/)) {
       const res = await sql`INSERT INTO project_tasks (task_name, parent_id, is_group, stt) VALUES (${description}, ${level1Id}, TRUE, ${stt}) RETURNING id;`;
       level2Id = res.rows[0].id;
+      tasksInserted++;
     } else if (!isNaN(Number(stt))) {
       await sql`INSERT INTO project_tasks (task_name, parent_id, contract_volume, unit, stt) VALUES (${description}, ${level2Id}, ${volume}, ${unit}, ${stt});`;
+      tasksInserted++;
     }
+  }
+
+  if (tasksInserted === 0) {
+    throw new Error('Không có công việc nào được lưu từ file PLHD. Vui lòng kiểm tra lại cấu trúc STT (A, I, 1) trong file Excel.');
   }
 }
 
-// Hàm xử lý Báo cáo tuần với logic làm sạch tên công việc
+// Hàm xử lý upload báo cáo tuần
 async function handleWeeklyReportUpload(filePath, fields) {
   const { fromDate, toDate } = fields;
   if (!fromDate || !toDate) throw new Error('Thiếu thông tin ngày.');
@@ -79,37 +112,30 @@ async function handleWeeklyReportUpload(filePath, fields) {
   const rows = data.slice(headerRowIndex + 1);
 
   const descIdx = headers.findIndex(h => h.toUpperCase().includes('CÔNG VIỆC'));
-  const workDoneIdx = headers.findIndex(h => h.toUpperCase() === 'THỰC HIỆN');
-  const cumulativeIdx = headers.findIndex(h => h.toUpperCase().includes('LŨY KẾ'));
-  const notesIdx = headers.findIndex(h => h.toUpperCase() === 'GHI CHÚ');
+  const workDoneIdx = headers.findIndex(h => h === 'Thực hiện');
+  const cumulativeIdx = headers.findIndex(h => h.includes('Lũy kế'));
+  const notesIdx = headers.findIndex(h => h === 'Ghi chú');
 
   const reportResult = await sql`INSERT INTO weekly_reports (start_date, end_date) VALUES (${fromDate}, ${toDate}) ON CONFLICT (start_date, end_date) DO UPDATE SET end_date = EXCLUDED.end_date RETURNING id;`;
   const reportId = reportResult.rows[0].id;
-  
-  let progressInserted = 0;
-  for (const row of rows) {
-    const taskName = String(row[descIdx] || '').trim(); // <-- LÀM SẠCH TÊN CÔNG VIỆC
-    const stt = String(row[0] || '').trim();
 
+  for (const row of rows) {
+    const taskName = String(row[descIdx] || '').trim();
+    const stt = String(row[0] || '').trim();
     if (taskName && !stt.match(/^[IVXLC]/i) && !stt.match(/\./)) {
-      // So sánh các tên công việc đã được làm sạch
+      // So sánh tên công việc đã được làm sạch
       const taskResult = await sql`SELECT id FROM project_tasks WHERE task_name = ${taskName} AND is_group = FALSE;`;
       if (taskResult.rows.length > 0) {
-        const taskId = taskResult.rows[0].id;
         const workDone = sanitizeNumber(row[workDoneIdx]);
         const cumulativeWorkDone = sanitizeNumber(row[cumulativeIdx]);
         const notes = row[notesIdx] || '';
-        await sql`INSERT INTO progress_entries (report_id, task_id, work_done_this_week, cumulative_work_done, notes) VALUES (${reportId}, ${taskId}, ${workDone}, ${cumulativeWorkDone}, ${notes}) ON CONFLICT (report_id, task_id) DO UPDATE SET work_done_this_week = EXCLUDED.work_done_this_week, cumulative_work_done = EXCLUDED.cumulative_work_done, notes = EXCLUDED.notes;`;
-        progressInserted++;
+        await sql`INSERT INTO progress_entries (report_id, task_id, work_done_this_week, cumulative_work_done, notes) VALUES (${reportId}, ${taskResult.rows[0].id}, ${workDone}, ${cumulativeWorkDone}, ${notes}) ON CONFLICT (report_id, task_id) DO UPDATE SET work_done_this_week = EXCLUDED.work_done_this_week, cumulative_work_done = EXCLUDED.cumulative_work_done, notes = EXCLUDED.notes;`;
       }
     }
   }
-  if (progressInserted === 0) {
-      console.warn("[BCT] Cảnh báo: Không có bản ghi tiến độ nào được lưu cho báo cáo này. Có thể tên công việc trong báo cáo tuần không khớp với tên trong file PLHD.");
-  }
 }
 
-// Handler chính
+// Handler chính của API
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const form = formidable({});
