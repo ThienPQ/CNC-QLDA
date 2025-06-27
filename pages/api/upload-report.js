@@ -58,12 +58,12 @@ export default async function handler(req, res) {
       for (const item of data) {
         await sql`
           INSERT INTO weekly_reports 
-          (stt, task_name, unit, volume_now, volume_total, percent, note, from_date, to_date, start_date)
+          (stt, task_name, unit, volume_now, volume_total, percent, note, from_date, to_date, start_date, end_date)
           VALUES (
             ${item.stt}, ${item.task_name}, ${item.unit},
             ${item.volume_now}, ${item.volume_total},
             ${item.percent}, ${item.note},
-            ${fromDate}, ${toDate}, ${fromDate}
+            ${fromDate}, ${toDate}, ${fromDate}, ${toDate}
           );
         `;
       }
