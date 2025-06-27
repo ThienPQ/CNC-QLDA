@@ -18,8 +18,10 @@ export default async function handler(req, res) {
   form.parse(req, async (err, fields, files) => {
     if (err) return res.status(500).json({ error: 'Lỗi khi xử lý tệp' });
 
-    const file = files.file;
-    if (!file) return res.status(400).json({ error: 'Không có tệp được tải lên' });
+    const file = Array.isArray(files.file) ? files.file[0] : files.file;
+    if (!file || !file.filepath) {
+      return res.status(400).json({ error: 'Không có tệp được tải lên hợp lệ' });
+    }
 
     try {
       const xlsx = await import('xlsx');
