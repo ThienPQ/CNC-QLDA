@@ -26,21 +26,39 @@ export default async function handler(req, res) {
 
   form.parse(req, async (err, fields, files) => {
     if (err) {
-      console.error(err);
+      console.error('Lỗi xử lý form:', err);
       return res.status(500).json({ message: 'Lỗi xử lý tệp' });
     }
+
+    console.log('Fields:', fields);
+    console.log('Files:', files);
 
     const file = files.file;
     const startDate = fields.startDate;
     const endDate = fields.endDate;
 
     if (!file || !startDate || !endDate) {
-      return res.status(400).json({ message: 'Thiếu dữ liệu đầu vào' });
+      return res.status(400).json({ message: 'Thiếu dữ liệu đầu vào (file, startDate, endDate)' });
     }
 
     const uploadedFile = Array.isArray(file) ? file[0] : file;
-    const workbook = xlsx.readFile(uploadedFile.filepath);
+    if (!uploadedFile || !uploadedFile.filepath) {
+      return res.status(400).json({ message: 'Tệp tin không hợp lệ hoặc thiếu đường dẫn' });
+    }
+
+    let workbook;
+    try {
+      workbook = xlsx.readFile(uploadedFile.filepath);
+    } catch (e) {
+      console.error('Lỗi đọc file Excel:', e);
+      return res.status(400).json({ message: 'Không thể đọc nội dung file Excel' });
+    }
+
     const sheetName = workbook.SheetNames.find(name => name.toLowerCase().includes('bc tuần'));
+    if (!sheetName) {
+      return res.status(400).json({ message: 'Không tìm thấy sheet "BC tuần" trong file Excel' });
+    }
+
     const sheet = workbook.Sheets[sheetName];
     const rawData = xlsx.utils.sheet_to_json(sheet, { range: 33 });
 
