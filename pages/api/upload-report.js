@@ -1,4 +1,4 @@
-// pages/api/upload-report.js (Phiên bản cuối cùng, đã thêm "làm sạch" dữ liệu)
+// pages/api/upload-report.js (Phiên bản cuối cùng, thêm phòng thủ và chẩn đoán)
 import { v2 as cloudinary } from 'cloudinary';
 import formidable from 'formidable';
 import xlsx from 'xlsx';
@@ -12,59 +12,61 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Hàm "làm sạch" giá trị số
-const sanitizeNumber = (value) => {
-  if (value === null || value === undefined || String(value).trim() === '') {
-    return null; // Chuyển ô trống hoặc rỗng thành NULL
-  }
-  const number = Number(value);
-  return isNaN(number) ? null : number; // Nếu không phải số, cũng chuyển thành NULL
-};
-
+// Hàm kiểm tra định dạng ngày YYYY-MM-DD
+function isValidDate(dateString) {
+  if (!dateString) return false;
+  const regEx = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateString.match(regEx)) return false; // Sai định dạng
+  const d = new Date(dateString);
+  const dNum = d.getTime();
+  if (!dNum && dNum !== 0) return false; // Không phải là ngày hợp lệ
+  return d.toISOString().slice(0, 10) === dateString;
+}
 
 // Hàm xử lý upload file kế hoạch hợp đồng (PLHD.xlsx)
 async function handleContractUpload(filePath) {
-  const workbook = xlsx.readFile(filePath);
-  const sheetName = 'Mẫu số 11C';
-  const sheet = workbook.Sheets[sheetName];
-  if (!sheet) throw new Error(`Không tìm thấy sheet có tên '${sheetName}' trong file PLHD.xlsx`);
-
-  const allSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: null });
-  const headerRowIndex = allSheetData.findIndex(row => String(row[0] || '').trim().toUpperCase() === 'STT');
-  if (headerRowIndex === -1) throw new Error("Không tìm thấy dòng tiêu đề (bắt đầu bằng 'STT') trong sheet 'Mẫu số 11C'.");
-
-  const dataRows = allSheetData.slice(headerRowIndex + 1);
-
-  await sql`TRUNCATE TABLE progress_entries, weekly_reports, project_tasks RESTART IDENTITY CASCADE;`;
-
-  let lastLevel1Id = null;
-  let lastLevel2Id = null;
-
-  for (const row of dataRows) {
-    const stt = String(row[0] || '').trim();
-    const description = row[1];
-    const unit = row[2];
-    const volume = sanitizeNumber(row[3]); // <-- Làm sạch giá trị Khối lượng
-
-    if (!description || !stt) continue;
-
-    if (stt.match(/^[A-Z]$/)) {
-      const res = await sql`INSERT INTO project_tasks (task_name, is_group, stt) VALUES (${description}, TRUE, ${stt}) RETURNING id;`;
-      lastLevel1Id = res.rows[0].id;
-    } else if (stt.match(/^[IVXLC]+$/)) {
-      const res = await sql`INSERT INTO project_tasks (task_name, parent_id, is_group, stt) VALUES (${description}, ${lastLevel1Id}, TRUE, ${stt}) RETURNING id;`;
-      lastLevel2Id = res.rows[0].id;
-    } else if (!isNaN(Number(stt))) {
-      await sql`INSERT INTO project_tasks (task_name, parent_id, contract_volume, unit, stt) VALUES (${description}, ${lastLevel2Id}, ${volume}, ${unit}, ${stt});`;
+    // ... nội dung hàm này giữ nguyên như cũ ...
+    const workbook = xlsx.readFile(filePath);
+    const sheetName = 'Mẫu số 11C';
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) throw new Error(`Không tìm thấy sheet có tên '${sheetName}' trong file PLHD.xlsx`);
+    const allSheetData = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: null });
+    const headerRowIndex = allSheetData.findIndex(row => String(row[0] || '').trim().toUpperCase() === 'STT');
+    if (headerRowIndex === -1) throw new Error("Không tìm thấy dòng tiêu đề (bắt đầu bằng 'STT') trong sheet 'Mẫu số 11C'.");
+    const headers = allSheetData[headerRowIndex].map(h => String(h || '').trim());
+    const dataRows = allSheetData.slice(headerRowIndex + 1);
+    const sttIdx = 0, descIdx = 1, unitIdx = 2, volumeIdx = 3;
+    await sql`TRUNCATE TABLE progress_entries, weekly_reports, project_tasks RESTART IDENTITY CASCADE;`;
+    let lastLevel1Id = null, lastLevel2Id = null;
+    for (const row of dataRows) {
+        const stt = String(row[sttIdx] || '').trim();
+        const description = row[descIdx];
+        if (!description || !stt) continue;
+        const unit = row[unitIdx];
+        const volume = Number(String(row[volumeIdx]).replace(/,/g, '')) || null;
+        if (stt.match(/^[A-Z]$/)) {
+            const res = await sql`INSERT INTO project_tasks (task_name, is_group, stt) VALUES (${description}, TRUE, ${stt}) RETURNING id;`;
+            lastLevel1Id = res.rows[0].id;
+        } else if (stt.match(/^[IVXLC]+$/)) {
+            const res = await sql`INSERT INTO project_tasks (task_name, parent_id, is_group, stt) VALUES (${description}, ${lastLevel1Id}, TRUE, ${stt}) RETURNING id;`;
+            lastLevel2Id = res.rows[0].id;
+        } else if (!isNaN(Number(stt))) {
+            await sql`INSERT INTO project_tasks (task_name, parent_id, contract_volume, unit, stt) VALUES (${description}, ${lastLevel2Id}, ${volume}, ${unit}, ${stt});`;
+        }
     }
-  }
 }
 
 // Hàm xử lý upload báo cáo tuần
 async function handleWeeklyReportUpload(filePath, fields) {
+  // --- THÊM LOG VÀ KIỂM TRA ĐẦU VÀO ---
   const fromDate = fields.fromDate?.[0];
   const toDate = fields.toDate?.[0];
-  if (!fromDate || !toDate) throw new Error('Cần có đủ thông tin "Từ ngày" và "Đến ngày".');
+  console.log(`[DEBUG] Nhận được fromDate: '${fromDate}', toDate: '${toDate}'`);
+
+  if (!isValidDate(fromDate) || !isValidDate(toDate)) {
+    throw new Error(`Ngày tháng không hợp lệ. Hệ thống nhận được fromDate='${fromDate}' và toDate='${toDate}'. Vui lòng kiểm tra lại dữ liệu nhập.`);
+  }
+  // --- KẾT THÚC KIỂM TRA ---
 
   const workbook = xlsx.readFile(filePath);
   const targetSheetName = workbook.SheetNames.find(name => name.trim().toLowerCase().includes('báo cáo tuần')) 
@@ -88,7 +90,7 @@ async function handleWeeklyReportUpload(filePath, fields) {
 
   for (const row of reportData) {
     const taskName = row['CÔNG VIỆC'] || row['Hạng mục công việc'];
-    const workDone = sanitizeNumber(row['Thực hiện']); // <-- Làm sạch giá trị Thực hiện
+    const workDone = sanitizeNumber(row['Thực hiện']);
     const notes = row['Ghi chú'];
     if (taskName) {
       const taskResult = await sql`SELECT id FROM project_tasks WHERE task_name = ${taskName} AND is_group = FALSE;`;
@@ -113,7 +115,7 @@ export default async function handler(req, res) {
       if (desiredFilename === 'PLHD.xlsx') {
         await handleContractUpload(file.filepath);
       } else if (desiredFilename === 'bao-cao-tuan.xlsx') {
-        await handleWeeklyReportUpload(file.filepath, { fromDate: fields.fromDate?.[0], toDate: fields.toDate?.[0] });
+        await handleWeeklyReportUpload(file.filepath, fields);
       }
       res.status(200).json({ message: `Xử lý thành công file: ${desiredFilename}` });
     } catch (error) {
