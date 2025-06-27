@@ -11,7 +11,12 @@ export default function LanhDaoBan() {
     async function fetchReports() {
       try {
         const response = await axios.get('/api/get-weekly-reports');
-        setReports(response.data);
+        if (Array.isArray(response.data)) {
+          setReports(response.data);
+        } else {
+          setReports([]);
+          setError('Dữ liệu phản hồi không hợp lệ');
+        }
       } catch (err) {
         setError('Không thể tải báo cáo tuần');
       }
@@ -48,7 +53,7 @@ export default function LanhDaoBan() {
                 </tr>
               </thead>
               <tbody>
-                {group.tasks.map((task, i) => (
+                {Array.isArray(group.tasks) && group.tasks.map((task, i) => (
                   <tr key={i}>
                     <td className="border border-gray-300 px-2 py-1">{task.stt}</td>
                     <td className="border border-gray-300 px-2 py-1">{task.task_name}</td>
