@@ -1,7 +1,6 @@
 // pages/api/upload-report.js
 import formidable from 'formidable';
 import fs from 'fs';
-import { parse } from 'date-fns';
 import { sql } from '@vercel/postgres';
 import xlsx from 'xlsx';
 
@@ -43,7 +42,7 @@ export default async function handler(req, res) {
     const workbook = xlsx.readFile(file[0].filepath);
     const sheetName = workbook.SheetNames.find(name => name.toLowerCase().includes('bc tuần'));
     const sheet = workbook.Sheets[sheetName];
-    const rawData = xlsx.utils.sheet_to_json(sheet, { range: 33 }); // bắt đầu từ dòng 34
+    const rawData = xlsx.utils.sheet_to_json(sheet, { range: 33 });
 
     const rows = rawData.map(row => ({
       stt: normalizeStt(row['STT']),
