@@ -9,7 +9,8 @@ export default async function handler(req, res) {
       AggregatedProgress AS (
         SELECT
           task_id,
-          SUM(work_done_this_week) as total_work_done
+          SUM(work_done_this_week) as total_work_done,
+          SUM(cumulative_work_done) as total_cumulative_work_done
         FROM progress_entries
         GROUP BY task_id
       ),
@@ -19,13 +20,13 @@ export default async function handler(req, res) {
         WHERE report_id = (SELECT id FROM LatestReport)
       )
       SELECT 
-        t1.stt,
+        t1.id,
         (SELECT task_name FROM project_tasks WHERE id = t2.parent_id) as category,
         t2.task_name as sub_category,
         t1.task_name, 
         COALESCE(lwp.work_done_this_week, 0) as work_done_this_week,
         COALESCE(ap.total_work_done, 0) as total_work_done,
-        (CASE WHEN t1.contract_volume > 0 THEN COALESCE(ap.total_work_done, 0) / t1.contract_volume ELSE 0 END) as completion_percentage
+        (CASE WHEN t1.contract_volume > 0 THEN COALESCE(ap.total_cumulative_work_done, 0) / t1.contract_volume ELSE 0 END) as completion_percentage
       FROM 
         project_tasks t1
       LEFT JOIN AggregatedProgress ap ON t1.id = ap.task_id

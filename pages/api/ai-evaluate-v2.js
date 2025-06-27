@@ -7,7 +7,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 export default async function handler(req) {
   try {
     const [reportsResult, tasksResult, progressResult] = await Promise.all([
-      sql`SELECT id, end_date FROM weekly_reports ORDER BY end_date DESC LIMIT 2;`,
+      sql`SELECT id FROM weekly_reports ORDER BY end_date DESC LIMIT 2;`,
       sql`SELECT id, task_name FROM project_tasks WHERE is_group = FALSE;`,
       sql`SELECT task_id, report_id, work_done_this_week, notes FROM progress_entries;`
     ]);

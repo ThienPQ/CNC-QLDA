@@ -60,6 +60,7 @@ export default function LanhDaoBanDashboard() {
           <h1 className="text-3xl font-bold text-gray-800 mb-6">Dashboard Quản Lý Tiến Độ Dự Án</h1>
           {loading && <p className="text-center text-gray-600">Đang tổng hợp và tính toán dữ liệu...</p>}
           {error && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4" role="alert"><p>{error}</p></div>}
+          
           {!loading && !error && (
             <div className="space-y-8">
               <div className="overflow-x-auto shadow-md rounded-lg">
