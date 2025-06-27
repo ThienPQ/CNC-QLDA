@@ -3,94 +3,81 @@ import { useState } from 'react';
 import axios from 'axios';
 
 export default function BanQLDA() {
-  const [file, setFile] = useState(null);
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-  // Thêm state để lưu loại file được chọn, mặc định là báo cáo tuần
-  const [fileType, setFileType] = useState('bao-cao-tuan.xlsx'); 
+  const [fileHD, setFileHD] = useState(null);
+  const [fileBC, setFileBC] = useState(null);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [message, setMessage] = useState('');
-  const [isUploading, setIsUploading] = useState(false);
 
-  const handleUpload = async (e) => {
-    e.preventDefault();
-    if (!file) {
-      alert('Vui lòng chọn file để tải lên.');
-      return;
-    }
-
-    setIsUploading(true);
-    setMessage('');
-
+  const handleUploadHD = async () => {
+    if (!fileHD) return;
     const formData = new FormData();
-    formData.append('file', file);
-    // Gửi đi loại file đã chọn (filename)
-    formData.append('filename', fileType); 
-    // Vẫn gửi cả ngày tháng (dù có thể không dùng cho PLHD)
-    formData.append('fromDate', fromDate);
-    formData.append('toDate', toDate);
+    formData.append('file', fileHD);
+
+    try {
+      const res = await axios.post('/api/upload-contract', formData);
+      setMessage(res.data.message);
+    } catch (err) {
+      setMessage('Lỗi khi upload hợp đồng');
+    }
+  };
+
+  const handleUploadBC = async () => {
+    if (!fileBC || !dateRange.from || !dateRange.to) return;
+    const formData = new FormData();
+    formData.append('file', fileBC);
+    formData.append('from', dateRange.from);
+    formData.append('to', dateRange.to);
 
     try {
       const res = await axios.post('/api/upload-report', formData);
       setMessage(res.data.message);
-    } catch (error) {
-      console.error(error);
-      const errorMessage = error.response?.data?.error || 'Tải lên thất bại.';
-      setMessage(`Lỗi: ${errorMessage}`);
-    } finally {
-      setIsUploading(false);
+    } catch (err) {
+      setMessage('Lỗi khi upload báo cáo tuần');
     }
   };
 
   return (
-    <form onSubmit={handleUpload} className="p-8 font-sans max-w-xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold">Gửi Báo Cáo & Kế Hoạch</h1>
-      
-      {/* ========================================================== */}
-      {/* THÊM Ô CHỌN LOẠI FILE MỚI */}
-      {/* ========================================================== */}
-      <div>
-        <label htmlFor="fileType" className="block text-sm font-medium text-gray-700 mb-1">
-          Chọn loại tài liệu để tải lên:
-        </label>
-        <select
-          id="fileType"
-          value={fileType}
-          onChange={(e) => setFileType(e.target.value)}
-          className="w-full p-2 border border-gray-300 rounded-md"
+    <div className="p-6 space-y-10">
+      <h1 className="text-2xl font-bold mb-4">Gửi Báo Cáo và Hợp Đồng</h1>
+
+      <div className="border p-4 rounded shadow">
+        <h2 className="font-semibold mb-2">1. Tải lên Hợp đồng PLHD (không cần ngày)</h2>
+        <input type="file" onChange={e => setFileHD(e.target.files[0])} />
+        <button
+          className="mt-2 px-4 py-1 bg-blue-600 text-white rounded"
+          onClick={handleUploadHD}
         >
-          <option value="bao-cao-tuan.xlsx">Báo Cáo Tuần</option>
-          <option value="PLHD.xlsx">Phụ Lục Hợp Đồng (PLHD)</option>
-        </select>
+          Gửi Hợp đồng
+        </button>
       </div>
 
-      {/* Chỉ hiển thị ô chọn ngày tháng khi là báo cáo tuần */}
-      {fileType === 'bao-cao-tuan.xlsx' && (
-        <div className="flex flex-col sm:flex-row sm:space-x-4 space-y-4 sm:space-y-0">
-            <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Từ ngày:</label>
-            <input type="date" required value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-full p-2 border border-gray-300 rounded-md" />
-            </div>
-            <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Đến ngày:</label>
-            <input type="date" required value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-full p-2 border border-gray-300 rounded-md" />
-            </div>
+      <div className="border p-4 rounded shadow">
+        <h2 className="font-semibold mb-2">2. Tải lên Báo cáo tuần (có chọn ngày)</h2>
+        <div className="flex gap-2 mb-2">
+          <input
+            type="date"
+            value={dateRange.from}
+            onChange={e => setDateRange(prev => ({ ...prev, from: e.target.value }))}
+            className="border p-1"
+          />
+          <span className="self-center">→</span>
+          <input
+            type="date"
+            value={dateRange.to}
+            onChange={e => setDateRange(prev => ({ ...prev, to: e.target.value }))}
+            className="border p-1"
+          />
         </div>
-      )}
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Chọn File Excel (.xlsx):</label>
-        <input type="file" required accept=".xlsx" onChange={(e) => setFile(e.target.files[0])} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+        <input type="file" onChange={e => setFileBC(e.target.files[0])} />
+        <button
+          className="mt-2 px-4 py-1 bg-green-600 text-white rounded"
+          onClick={handleUploadBC}
+        >
+          Gửi Báo cáo tuần
+        </button>
       </div>
 
-      <button
-        type="submit"
-        disabled={isUploading}
-        className="w-full bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 disabled:bg-gray-400"
-      >
-        {isUploading ? 'Đang gửi...' : 'Gửi Tài Liệu'}
-      </button>
-
-      {message && <p className="mt-4 text-center text-sm font-medium">{message}</p>}
-    </form>
+      {message && <p className="text-center text-blue-700 font-medium mt-4">{message}</p>}
+    </div>
   );
 }
