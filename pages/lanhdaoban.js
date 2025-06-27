@@ -24,6 +24,10 @@ export default function LanhDaoBan() {
     fetchReports();
   }, []);
 
+  if (!Array.isArray(reports)) {
+    return <div className="p-4 text-red-500">Dữ liệu phản hồi không hợp lệ.</div>;
+  }
+
   return (
     <div className="p-4">
       <Head>
@@ -53,17 +57,23 @@ export default function LanhDaoBan() {
                 </tr>
               </thead>
               <tbody>
-                {Array.isArray(group.tasks) && group.tasks.map((task, i) => (
-                  <tr key={i}>
-                    <td className="border border-gray-300 px-2 py-1">{task.stt}</td>
-                    <td className="border border-gray-300 px-2 py-1">{task.task_name}</td>
-                    <td className="border border-gray-300 px-2 py-1">{task.group_name || ''}</td>
-                    <td className="border border-gray-300 px-2 py-1">{task.unit}</td>
-                    <td className="border border-gray-300 px-2 py-1">{task.volume_total}</td>
-                    <td className="border border-gray-300 px-2 py-1">{task.percent}</td>
-                    <td className="border border-gray-300 px-2 py-1">{task.note}</td>
+                {Array.isArray(group.tasks) && group.tasks.length > 0 ? (
+                  group.tasks.map((task, i) => (
+                    <tr key={i}>
+                      <td className="border border-gray-300 px-2 py-1">{task.stt}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task.task_name}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task.group_name || ''}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task.unit}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task.volume_total}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task.percent}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task.note}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="7" className="text-center border border-gray-300 py-2 text-gray-500">Không có công việc nào.</td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
