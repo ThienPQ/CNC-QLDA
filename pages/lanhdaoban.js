@@ -38,11 +38,13 @@ export default function LanhDaoBan() {
 
       {error && <p className="text-red-500">{error}</p>}
 
-      {Array.isArray(reports) && reports.length > 0 ? (
+      {reports.length === 0 ? (
+        <p>Không có dữ liệu báo cáo.</p>
+      ) : (
         reports.map((group, idx) => (
           <div key={idx} className="mb-8">
             <h2 className="text-xl font-semibold text-blue-700 mb-2">
-              {group.category || 'Hạng mục chưa xác định'}
+              {group?.category || 'Hạng mục chưa xác định'}
             </h2>
             <table className="w-full border-collapse border border-gray-300">
               <thead>
@@ -57,16 +59,16 @@ export default function LanhDaoBan() {
                 </tr>
               </thead>
               <tbody>
-                {Array.isArray(group.tasks) && group.tasks.length > 0 ? (
+                {Array.isArray(group?.tasks) && group.tasks.length > 0 ? (
                   group.tasks.map((task, i) => (
                     <tr key={i}>
-                      <td className="border border-gray-300 px-2 py-1">{task.stt}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.task_name}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.group_name || ''}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.unit}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.volume_total}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.percent}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.note}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task?.stt}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task?.task_name}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task?.group_name || ''}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task?.unit}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task?.volume_total}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task?.percent}</td>
+                      <td className="border border-gray-300 px-2 py-1">{task?.note}</td>
                     </tr>
                   ))
                 ) : (
@@ -78,8 +80,6 @@ export default function LanhDaoBan() {
             </table>
           </div>
         ))
-      ) : (
-        <p>Không có dữ liệu báo cáo.</p>
       )}
     </div>
   );
