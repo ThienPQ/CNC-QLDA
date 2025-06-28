@@ -11,8 +11,8 @@ export default function LanhDaoBan() {
     async function fetchReports() {
       try {
         const response = await axios.get('/api/get-weekly-reports');
-        if (Array.isArray(response.data)) {
-          setReports(response.data);
+        if (Array.isArray(response.data?.report_tasks)) {
+          setReports(response.data.report_tasks);
         } else {
           setReports([]);
           setError('Dữ liệu phản hồi không hợp lệ');
