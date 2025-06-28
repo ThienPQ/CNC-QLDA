@@ -50,7 +50,7 @@ export default function LanhDaoBan() {
       ) : (
         Object.entries(groupedReports).map(([group, tasks], groupIndex) => (
           <div key={groupIndex} className="mb-6">
-            <h2 className="text-lg font-semibold mb-2">{group}</h2>
+            <h2 className="text-lg font-semibold mb-2">Tuyến/Công trình: {group}</h2>
             <table className="w-full border-collapse border border-gray-300">
               <thead>
                 <tr className="bg-gray-100">
@@ -66,7 +66,7 @@ export default function LanhDaoBan() {
               <tbody>
                 {tasks.map((task, i) => (
                   <tr key={i}>
-                    <td className="border border-gray-300 px-2 py-1">{task.stt}</td>
+                    <td className="border border-gray-300 px-2 py-1">{i + 1}</td>
                     <td className="border border-gray-300 px-2 py-1">{task.task_name}</td>
                     <td className="border border-gray-300 px-2 py-1">{task.unit}</td>
                     <td className="border border-gray-300 px-2 py-1">{task.volume_now}</td>
