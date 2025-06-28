@@ -12,7 +12,10 @@ export default function LanhDaoBan() {
       try {
         const response = await axios.get('/api/get-weekly-reports');
         if (Array.isArray(response.data?.report_tasks)) {
-          setReports(response.data.report_tasks);
+          const filtered = response.data.report_tasks.filter(
+            task => task.task_name && task.task_name.trim() !== ''
+          );
+          setReports(filtered);
         } else {
           setReports([]);
           setError('Dữ liệu phản hồi không hợp lệ');
