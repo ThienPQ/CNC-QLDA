@@ -38,7 +38,7 @@ export default function LanhDaoBan() {
 
       {error && <p className="text-red-500">{error}</p>}
 
-      {reports.length > 0 ? (
+      {Array.isArray(reports) && reports.length > 0 ? (
         reports.map((group, idx) => (
           <div key={idx} className="mb-8">
             <h2 className="text-xl font-semibold text-blue-700 mb-2">
