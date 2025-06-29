@@ -1,103 +1,101 @@
 // pages/api/upload-report.js
-import formidable from 'formidable';
-import { sql } from '@vercel/postgres';
+import formidable from 'formidable-serverless';
 import xlsx from 'xlsx';
+import { Pool } from 'pg';
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+export const config = { api: { bodyParser: false } };
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-function normalizeStt(stt) {
-  if (!stt) return '';
-  if (/^[IVXLCDM]+$/i.test(stt)) {
-    const romanToDecimal = {
-      I: '1', II: '2', III: '3', IV: '4', V: '5', VI: '6', VII: '7',
-      VIII: '8', IX: '9', X: '10'
-    };
-    return romanToDecimal[stt.toUpperCase()] || stt;
-  }
-  return stt.replace(/[^0-9.]/g, '');
-}
+function isRoman(str) { return /^[IVXLCDM]+(\.)?$/.test((str||"").toString().trim()); }
 
 export default async function handler(req, res) {
-  const form = formidable({ keepExtensions: true });
-
+  if (req.method !== "POST") return res.status(405).send("Only POST allowed");
+  const form = new formidable.IncomingForm();
   form.parse(req, async (err, fields, files) => {
-    if (err) {
-      console.error('Lỗi xử lý form:', err);
-      return res.status(500).json({ message: 'Lỗi xử lý tệp' });
-    }
-
-    const file = files.file;
-    const startDate = fields.startDate || fields.fromDate;
-    const endDate = fields.endDate || fields.toDate;
-
-    if (!file || !startDate || !endDate) {
-      return res.status(400).json({ message: 'Thiếu dữ liệu đầu vào (file, startDate, endDate)' });
-    }
-
-    const uploadedFile = Array.isArray(file) ? file[0] : file;
-    if (!uploadedFile || !uploadedFile.filepath) {
-      return res.status(400).json({ message: 'Tệp tin không hợp lệ hoặc thiếu đường dẫn' });
-    }
-
-    let workbook;
+    const client = await pool.connect();
     try {
-      workbook = xlsx.readFile(uploadedFile.filepath);
-    } catch (e) {
-      console.error('Lỗi đọc file Excel:', e);
-      return res.status(400).json({ message: 'Không thể đọc nội dung file Excel' });
-    }
+      const from_date = fields.from_date?.toString();
+      const to_date = fields.to_date?.toString();
+      if (!from_date || !to_date) return res.status(400).json({ error: "Thiếu ngày báo cáo." });
 
-    const sheetName = workbook.SheetNames.find(name => name.toLowerCase().includes('bc tuần'));
-    if (!sheetName) {
-      return res.status(400).json({ message: 'Không tìm thấy sheet "BC tuần" trong file Excel' });
-    }
+      // Kiểm tra trùng tuần
+      const { rows: exist } = await client.query(
+        "SELECT * FROM weekly_reports WHERE from_date=$1 AND to_date=$2", [from_date, to_date]
+      );
+      if (exist.length > 0) return res.status(400).json({ error: "Tuần này đã có báo cáo!" });
 
-    const sheet = workbook.Sheets[sheetName];
-    const rawData = xlsx.utils.sheet_to_json(sheet, { range: 33 });
+      // Tạo báo cáo tuần mới
+      const { rows: rep } = await client.query(
+        "INSERT INTO weekly_reports (from_date, to_date) VALUES ($1,$2) RETURNING id",
+        [from_date, to_date]
+      );
+      const report_id = rep[0].id;
 
-    const rows = rawData.map(row => ({
-      stt: normalizeStt(row['STT']),
-      task_name: row['Tên công việc'],
-      unit: row['Đơn vị'],
-      volume_total: row['Lũy kế đến nay'],
-      percent: row['% hoàn thiện theo dự án'],
-      note: row['Ghi chú'] || '',
-      start_date: Array.isArray(startDate) ? startDate[0] : startDate,
-      end_date: Array.isArray(endDate) ? endDate[0] : endDate,
-      created_at: new Date().toISOString(),
-    }));
+      // Đọc file excel
+      const workbook = xlsx.readFile(files.file.filepath);
+      const sheetNames = workbook.SheetNames.filter(name => name.toLowerCase().startsWith('bc tuần'));
+      for (const sheetName of sheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
 
-    try {
-      for (const row of rows) {
-        const existing = await sql`
-          SELECT 1 FROM weekly_reports
-          WHERE stt = ${row.stt} AND start_date = ${row.start_date} AND end_date = ${row.end_date}
-          LIMIT 1
-        `;
+        let parent_code = "", parent_name = "";
+        let group_code = "", group_name = "";
+        let headerRowIdx = data.findIndex(row =>
+          row && row.some(cell => (cell||"").toLowerCase().includes('công việc'))
+        );
+        if (headerRowIdx === -1) continue;
+        const header = data[headerRowIdx];
 
-        if (existing.rows.length === 0) {
-          await sql`
-            INSERT INTO weekly_reports (stt, task_name, unit, volume_total, percent, note, start_date, end_date, created_at)
-            VALUES (${row.stt}, ${row.task_name}, ${row.unit}, ${row.volume_total}, ${row.percent}, ${row.note}, ${row.start_date}, ${row.end_date}, ${row.created_at})
-          `;
-        } else {
-          await sql`
-            UPDATE weekly_reports
-            SET task_name = ${row.task_name}, unit = ${row.unit}, volume_total = ${row.volume_total},
-                percent = ${row.percent}, note = ${row.note}, created_at = ${row.created_at}
-            WHERE stt = ${row.stt} AND start_date = ${row.start_date} AND end_date = ${row.end_date}
-          `;
-          console.log(`Đã cập nhật công việc STT=${row.stt} trong báo cáo tuần ${row.start_date} đến ${row.end_date}`);
+        // Xác định cột
+        const colMap = {};
+        header.forEach((cell, idx) => {
+          if ((cell||"").toLowerCase().includes("công việc")) colMap.task_name = idx;
+          if ((cell||"").toLowerCase().includes("lý trình")) colMap.ly_trinh = idx;
+          if ((cell||"").toLowerCase().includes("đơn vị")) colMap.unit = idx;
+          if ((cell||"").toLowerCase().includes("thiết kế")) colMap.volume = idx;
+          if ((cell||"").toLowerCase().includes("% hoàn thành trong tuần")) colMap.percent_week = idx;
+          if ((cell||"").toLowerCase().includes("% hoàn thiện theo dự án")) colMap.percent_project = idx;
+          if ((cell||"").toLowerCase().includes("ghi chú")) colMap.note = idx;
+        });
+
+        // Parse từng dòng sau header
+        for (let i = headerRowIdx + 1; i < data.length; i++) {
+          const row = data[i];
+          if (!row || row.length === 0) continue;
+          // Hạng mục cha
+          if (isRoman(row[0]) && !/\./.test(row[0])) {
+            parent_code = row[0];
+            parent_name = row.find((c, idx) => idx > 0 && c && c.toString().trim() !== "") || "";
+            continue;
+          }
+          // Nhóm con (I.1, I.2...)
+          if (/^[IVXLCDM]+\.\d+$/.test(row[0])) {
+            group_code = row[0];
+            group_name = row.find((c, idx) => idx > 0 && c && c.toString().trim() !== "") || "";
+            continue;
+          }
+          // Dòng công việc
+          const task_name = row[colMap.task_name] || "";
+          if (!task_name || !parent_code || !group_code) continue;
+
+          await client.query(
+            `INSERT INTO report_tasks (
+              report_id, parent_code, parent_name, group_code, group_name, task_name,
+              unit, volume, percent_week, percent_project, note
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+            [
+              report_id, parent_code, parent_name, group_code, group_name, task_name,
+              row[colMap.unit]||"", parseFloat(row[colMap.volume]||0), row[colMap.percent_week]||"",
+              row[colMap.percent_project]||"", row[colMap.note]||""
+            ]
+          );
         }
       }
-      return res.status(200).json({ message: 'Đã lưu hoặc cập nhật báo cáo tuần thành công' });
-    } catch (e) {
-      console.error('Lỗi khi ghi CSDL:', e);
-      return res.status(500).json({ message: 'Lỗi ghi cơ sở dữ liệu' });
+      client.release();
+      res.status(200).json({ message: "Upload và import thành công!" });
+    } catch (error) {
+      client.release();
+      res.status(500).json({ error: error.message });
     }
   });
 }
