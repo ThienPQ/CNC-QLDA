@@ -1,100 +1,27 @@
 // pages/api/upload-report.js
 import formidable from 'formidable-serverless';
-import xlsx from 'xlsx';
+import * as XLSX from 'xlsx';
 import { Pool } from 'pg';
 
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL
+  connectionString: process.env.DATABASE_URL, // Khai báo đúng connection string của Neon
+  ssl: { rejectUnauthorized: false }
 });
 
-export const config = { api: { bodyParser: false } };
-
-function isRomanNumeral(str) {
-  return /^[IVXLCDM]+\.*$/.test(str.trim());
+// Hàm kiểm tra chuỗi là số La Mã (I, II, III...)
+function isRoman(str) {
+  return /^[IVXLCDM]+$/.test(str.trim());
 }
 
-function findHeaderRow(sheet) {
-  const headers = [
-    "Công việc", "Lý trình", "Đơn vị", "Thiết kế", 
-    "% hoàn thành trong tuần", "% hoàn thiện theo dự án", "Ghi chú"
-  ];
-  const range = xlsx.utils.decode_range(sheet['!ref']);
-  for (let row = range.s.r; row <= range.e.r; ++row) {
-    let found = 0;
-    let headerIndexes = {};
-    for (let col = range.s.c; col <= range.e.c; ++col) {
-      const cell = sheet[xlsx.utils.encode_cell({c: col, r: row})];
-      if (cell && typeof cell.v === 'string') {
-        for (const h of headers) {
-          if (cell.v.trim().toLowerCase().includes(h.toLowerCase())) {
-            found += 1;
-            headerIndexes[h] = col;
-          }
-        }
-      }
-    }
-    if (found >= headers.length - 1) {
-      return { row, headerIndexes };
-    }
-  }
-  return null;
-}
-
-async function parseExcel(filePath, fromDate, toDate) {
-  const workbook = xlsx.readFile(filePath);
-  const results = [];
-  for (const sheetName of workbook.SheetNames) {
-    if (!/^BC tuần/i.test(sheetName)) continue;
-    const sheet = workbook.Sheets[sheetName];
-    const headerInfo = findHeaderRow(sheet);
-    if (!headerInfo) continue;
-    const { row: headerRow, headerIndexes } = headerInfo;
-    const range = xlsx.utils.decode_range(sheet['!ref']);
-    let currentGroup = '';
-    let currentGroupName = '';
-    let currentSubGroup = '';
-    let currentSubGroupName = '';
-    for (let r = headerRow + 1; r <= range.e.r; ++r) {
-      const firstCell = sheet[xlsx.utils.encode_cell({c: range.s.c, r})];
-      const secondCell = sheet[xlsx.utils.encode_cell({c: range.s.c + 1, r})];
-      if (firstCell && typeof firstCell.v === 'string' && isRomanNumeral(firstCell.v.trim())) {
-        currentGroup = firstCell.v.trim();
-        currentGroupName = secondCell && secondCell.v ? secondCell.v.toString().trim() : '';
-        continue;
-      }
-      if (firstCell && typeof firstCell.v === 'string' && /^[IVXLCDM]+\.[0-9]+$/.test(firstCell.v.trim())) {
-        currentSubGroup = firstCell.v.trim();
-        currentSubGroupName = secondCell && secondCell.v ? secondCell.v.toString().trim() : '';
-      }
-
-      let rowObj = {};
-      for (const key in headerIndexes) {
-        const colIdx = headerIndexes[key];
-        const cell = sheet[xlsx.utils.encode_cell({c: colIdx, r})];
-        let val = cell && cell.v ? cell.v : '';
-        if (typeof val === 'number') val = val.toString();
-        rowObj[key] = val;
-      }
-
-      if (rowObj["Công việc"] || currentSubGroup) {
-        results.push({
-          group_code: currentGroup,
-          group_name: currentGroupName,
-          sub_group_code: currentSubGroup,
-          sub_group_name: currentSubGroupName,
-          task_name: rowObj["Công việc"] || '',
-          ly_trinh: rowObj["Lý trình"] || '',
-          unit: rowObj["Đơn vị"] || '',
-          thiet_ke: rowObj["Thiết kế"] || '',
-          percent_week: rowObj["% hoàn thành trong tuần"] || '',
-          percent_duan: rowObj["% hoàn thiện theo dự án"] || '',
-          note: rowObj["Ghi chú"] || '',
-          fromDate, toDate
-        });
-      }
-    }
-  }
-  return results;
+// Hàm kiểm tra chuỗi là mã mục con (I.1, II.2...)
+function isRomanDotNumber(str) {
+  return /^[IVXLCDM]+\.\d+$/.test(str.trim());
 }
 
 export default async function handler(req, res) {
@@ -104,49 +31,127 @@ export default async function handler(req, res) {
   }
 
   const form = new formidable.IncomingForm();
+
   form.parse(req, async (err, fields, files) => {
-    if (err) {
-      res.status(400).json({ error: 'Form parse error' });
+    if (err || !files.file) {
+      res.status(400).json({ error: 'No file uploaded.' });
       return;
     }
+
     try {
-      const { fromDate, toDate } = fields;
-      if (!files.file) {
-        res.status(400).json({ error: 'No file uploaded' });
+      // Đọc file excel
+      const workbook = XLSX.readFile(files.file.path);
+      const sheetNames = workbook.SheetNames.filter(
+        name => name.toLowerCase().startsWith('bc tuần')
+      );
+
+      if (sheetNames.length === 0) {
+        res.status(400).json({ error: 'Không tìm thấy sheet BC tuần...' });
         return;
       }
-      const filePath = files.file.path;
-      const dataRows = await parseExcel(filePath, fromDate, toDate);
 
-      // Xoá dữ liệu cũ nếu trùng fromDate-toDate
-      await pool.query('DELETE FROM weekly_reports WHERE from_date=$1 AND to_date=$2', [fromDate, toDate]);
-
-      // Ghi dữ liệu mới
-      for (const row of dataRows) {
-        await pool.query(
-          `INSERT INTO weekly_reports
-            (group_code, group_name, sub_group_code, sub_group_name, task_name, ly_trinh, unit, thiet_ke, percent_week, percent_duan, note, from_date, to_date)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-          [
-            row.group_code,
-            row.group_name,
-            row.sub_group_code,
-            row.sub_group_name,
-            row.task_name,
-            row.ly_trinh,
-            row.unit,
-            row.thiet_ke,
-            row.percent_week,
-            row.percent_duan,
-            row.note,
-            row.fromDate,
-            row.toDate
-          ]
-        );
+      // Lấy fromDate và toDate từ fields nếu có, hoặc từ tên sheet
+      let fromDate = fields.fromDate || '';
+      let toDate = fields.toDate || '';
+      // Nếu không có fields, thử lấy từ tên sheet
+      if ((!fromDate || !toDate) && sheetNames[0]) {
+        const match = sheetNames[0].match(/(\d{1,2})[^\d]+(\d{1,2})[^\d]+(\d{1,4})/g);
+        // Tùy cấu trúc tên sheet, có thể bóc tách ngày ở đây nếu bạn muốn
       }
-      res.json({ success: true, rows: dataRows.length });
+
+      // Lặp từng sheet báo cáo tuần (mỗi tuần 1 sheet)
+      for (const sheetName of sheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+        let startRow = 0;
+        // Tìm dòng tiêu đề
+        for (let i = 0; i < rows.length; i++) {
+          const joined = rows[i].join(' ').toLowerCase();
+          if (joined.includes('công việc') && joined.includes('đơn vị') && joined.includes('thiết kế')) {
+            startRow = i + 1;
+            break;
+          }
+        }
+        if (!startRow) continue; // Không tìm thấy tiêu đề
+
+        let group_code = '';
+        let group_name = '';
+        let skip = false;
+
+        for (let i = startRow; i < rows.length; i++) {
+          const row = rows[i];
+          if (!row || row.length < 2) continue;
+
+          // Bỏ qua mọi dòng chứa từ khóa "kết luận" hoặc "kiến nghị" (từ khóa không phân biệt hoa thường)
+          const joinedRow = row.map(cell => String(cell || '').toLowerCase()).join(' ');
+          if (joinedRow.includes('kết luận') || joinedRow.includes('kiến nghị')) break;
+
+          // Nếu là hạng mục cha (I, II, III...), lấy tên nhóm cha
+          if (isRoman(row[0])) {
+            group_code = row[0].trim();
+            // Lấy tên nhóm cha từ cột tiếp theo có text
+            group_name = '';
+            for (let c = 1; c < row.length; c++) {
+              if (row[c] && row[c].trim()) {
+                group_name = row[c].trim();
+                break;
+              }
+            }
+            continue;
+          }
+
+          // Nếu là hạng mục con (I.1, I.2...), gán sub_code & sub_name
+          let sub_code = '';
+          let sub_name = '';
+          if (isRomanDotNumber(row[0])) {
+            sub_code = row[0].trim();
+            sub_name = '';
+            for (let c = 1; c < row.length; c++) {
+              if (row[c] && row[c].trim()) {
+                sub_name = row[c].trim();
+                break;
+              }
+            }
+            // Không push dòng này, vì là header nhóm con
+            continue;
+          }
+
+          // Chỉ parse các dòng dữ liệu thực sự (có tên công việc)
+          // Giả sử tiêu đề là: STT | Công việc | Lý trình | Đơn vị | Thiết kế | ...% trong tuần | ...% theo dự án | Ghi chú
+          // Bạn có thể cần điều chỉnh chỉ số dưới đây đúng với file thực tế!
+          if (
+            row.length >= 10 &&                // Số cột tối thiểu
+            row[1] && row[3] && row[4]         // Có Tên công việc, Đơn vị, Thiết kế
+          ) {
+            // Đưa dữ liệu vào database
+            await pool.query(
+              `INSERT INTO weekly_reports 
+                (group_code, group_name, sub_code, sub_name, task_name, ly_trinh, unit, thiet_ke, percent_week, percent_duan, note, from_date, to_date)
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+              [
+                group_code,
+                group_name,
+                sub_code,
+                sub_name,
+                row[1].trim(),
+                row[2] ? row[2].trim() : '',
+                row[3].trim(),
+                row[4] ? row[4].trim() : '',
+                row[8] ? row[8].toString().replace('%', '').trim() : '', // % trong tuần
+                row[9] ? row[9].toString().replace('%', '').trim() : '', // % theo dự án
+                row[10] ? row[10].trim() : '',
+                fromDate,
+                toDate,
+              ]
+            );
+          }
+        }
+      }
+
+      res.status(200).json({ message: 'Đã upload và lưu báo cáo tuần!' });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      res.status(500).json({ error: e.message || e.toString() });
     }
   });
 }
