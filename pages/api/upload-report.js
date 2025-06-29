@@ -3,9 +3,7 @@ import formidable from 'formidable-serverless';
 import { Client } from 'pg';
 import xlsx from 'xlsx';
 
-export const config = {
-  api: { bodyParser: false },
-};
+export const config = { api: { bodyParser: false } };
 
 const PG_CONNECTION_STRING = process.env.DATABASE_URL;
 
@@ -23,11 +21,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: "Lỗi upload form" });
       }
 
-      // Đọc fields và files đầu vào
-      console.log("FIELDS:", fields);
-      console.log("FILES:", files);
-
-      // Lấy đúng giá trị trường (array hoặc string)
+      // Chuẩn hóa lấy giá trị trường ngày
       const getField = v => (Array.isArray(v) ? v[0] : v);
 
       const fromDate = getField(fields.fromDate);
@@ -37,11 +31,9 @@ export default async function handler(req, res) {
       // Kiểm tra định dạng ngày yyyy-mm-dd
       const isDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
       if (!isDate(fromDate) || !isDate(toDate)) {
-        console.log('fromDate/toDate bị sai định dạng:', { fromDate, toDate });
         return res.status(400).json({ error: 'fromDate/toDate phải là yyyy-mm-dd' });
       }
       if (!file) {
-        console.log("Không có file upload");
         return res.status(400).json({ error: 'Thiếu file báo cáo tuần' });
       }
 
@@ -52,44 +44,46 @@ export default async function handler(req, res) {
       // Tìm sheet bắt đầu bằng 'BC tuần'
       const sheetName = workbook.SheetNames.find(n => n.trim().toLowerCase().startsWith('bc tuần'));
       if (!sheetName) {
-        console.log("Không tìm thấy sheet báo cáo tuần");
         return res.status(400).json({ error: 'Không tìm thấy sheet báo cáo tuần' });
       }
       const ws = workbook.Sheets[sheetName];
       const rows = xlsx.utils.sheet_to_json(ws, { header: 1, raw: false });
 
-      // Tìm dòng tiêu đề bảng công việc
+      // --- Bước 1: Tìm dòng tiêu đề đúng ---
       let headerRowIdx = -1;
       let colMap = {};
       for (let i = 0; i < rows.length; i++) {
-        const row = rows[i].map(cell => (cell ? cell.toString().toLowerCase() : ''));
+        const row = rows[i].map(cell => (cell ? cell.toString().toLowerCase().replace(/\s+/g, '') : ''));
         if (
-          row.includes('công việc') &&
-          row.includes('lý trình') &&
-          row.includes('đơn vị') &&
-          row.includes('thiết kế')
+          row.includes('côngviệc') &&
+          row.includes('lýtrình') &&
+          row.includes('đơnvị') &&
+          row.includes('thiếtkế') &&
+          row.find(cell => cell.includes('hoànthànhtrongtuần')) !== undefined &&
+          row.find(cell => cell.includes('hoànthiệntheodựán')) !== undefined
         ) {
           headerRowIdx = i;
+          // Lưu lại index các cột
+          const originalRow = rows[i];
           colMap = {
-            stt: row.indexOf('stt'),
-            group: row.indexOf('công việc'),
-            ly_trinh: row.indexOf('lý trình'),
-            unit: row.indexOf('đơn vị'),
-            thiet_ke: row.indexOf('thiết kế'),
-            percent_week: row.findIndex(cell => cell.includes('hoàn thành trong tuần')),
-            percent_duan: row.findIndex(cell => cell.includes('theo dự án')),
-            note: row.findIndex(cell => cell.includes('ghi chú'))
+            stt: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '') === 'stt'),
+            task_name: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '') === 'côngviệc'),
+            ly_trinh: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '') === 'lýtrình'),
+            unit: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '') === 'đơnvị'),
+            thiet_ke: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '') === 'thiếtkế'),
+            percent_week: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '').includes('hoànthànhtrongtuần')),
+            percent_duan: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '').includes('hoànthiệntheodựán')),
+            note: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '').includes('ghichú')),
           };
           break;
         }
       }
 
       if (headerRowIdx === -1) {
-        console.log('Không tìm thấy dòng tiêu đề!');
         return res.status(400).json({ error: 'Không tìm thấy dòng tiêu đề bảng công việc!' });
       }
 
-      // Parse block dữ liệu sau tiêu đề
+      // --- Bước 2: Lấy dữ liệu từng dòng dưới tiêu đề ---
       let data = [];
       let currentGroup = '';
       for (let i = headerRowIdx + 1; i < rows.length; i++) {
@@ -99,15 +93,15 @@ export default async function handler(req, res) {
         // Nếu dòng bắt đầu bằng số La Mã (I, II, III...) => cập nhật currentGroup
         const sttCell = row[colMap.stt];
         if (typeof sttCell === 'string' && /^[IVXLCDM]+\b/.test(sttCell.trim())) {
-          currentGroup = row[colMap.group] || '';
+          currentGroup = row[colMap.task_name] || '';
           continue;
         }
 
-        // Nếu là dòng công việc thật sự
-        if (row[colMap.group] && row[colMap.group].toString().trim()) {
+        // Nếu là dòng công việc thật sự (task_name không rỗng)
+        if (row[colMap.task_name] && row[colMap.task_name].toString().trim()) {
           data.push({
             group: currentGroup,
-            task_name: row[colMap.group] || '',
+            task_name: row[colMap.task_name] || '',
             ly_trinh: row[colMap.ly_trinh] || '',
             unit: row[colMap.unit] || '',
             thiet_ke: row[colMap.thiet_ke] || '',
@@ -117,8 +111,6 @@ export default async function handler(req, res) {
           });
         }
       }
-
-      console.log('DATA:', data.slice(0, 5));
 
       // Kết nối và lưu vào CSDL Neon
       const client = new Client({ connectionString: PG_CONNECTION_STRING, ssl: { rejectUnauthorized: false } });
@@ -130,7 +122,6 @@ export default async function handler(req, res) {
         [fromDate, toDate]
       );
       if (check.rows.length) {
-        console.log('Báo cáo tuần này đã tồn tại');
         await client.end();
         return res.status(400).json({ error: 'Báo cáo tuần này đã tồn tại!' });
       }
