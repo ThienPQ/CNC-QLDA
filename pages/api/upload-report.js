@@ -1,153 +1,165 @@
 // pages/api/upload-report.js
 import formidable from 'formidable-serverless';
-import { Client } from 'pg';
+import fs from 'fs';
 import xlsx from 'xlsx';
+import { Pool } from 'pg';
 
-export const config = { api: { bodyParser: false } };
+// Chỉnh lại kết nối cho đúng của bạn
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL
+});
 
-const PG_CONNECTION_STRING = process.env.DATABASE_URL;
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
+function isRomanNumeral(str) {
+  return /^[IVXLCDM]+\.*$/.test(str.trim());
+}
+
+function findHeaderRow(sheet) {
+  const headers = [
+    "Công việc", "Lý trình", "Đơn vị", "Thiết kế", 
+    "% hoàn thành trong tuần", "% hoàn thiện theo dự án", "Ghi chú"
+  ];
+  const range = xlsx.utils.decode_range(sheet['!ref']);
+  for (let row = range.s.r; row <= range.e.r; ++row) {
+    let found = 0;
+    let headerIndexes = {};
+    for (let col = range.s.c; col <= range.e.c; ++col) {
+      const cell = sheet[xlsx.utils.encode_cell({c: col, r: row})];
+      if (cell && typeof cell.v === 'string') {
+        for (const h of headers) {
+          if (cell.v.trim().toLowerCase().includes(h.toLowerCase())) {
+            found += 1;
+            headerIndexes[h] = col;
+          }
+        }
+      }
+    }
+    if (found >= headers.length - 1) { // Chỉ cần gần đủ cột, có thể thiếu 1
+      return { row, headerIndexes };
+    }
+  }
+  return null;
+}
+
+async function parseExcel(filePath, fromDate, toDate) {
+  const workbook = xlsx.readFile(filePath);
+  const results = [];
+  for (const sheetName of workbook.SheetNames) {
+    if (!/^BC tuần/i.test(sheetName)) continue;
+    const sheet = workbook.Sheets[sheetName];
+    const headerInfo = findHeaderRow(sheet);
+    if (!headerInfo) continue;
+    const { row: headerRow, headerIndexes } = headerInfo;
+    const range = xlsx.utils.decode_range(sheet['!ref']);
+    let currentGroup = '';
+    let currentGroupName = '';
+    let currentSubGroup = '';
+    let currentSubGroupName = '';
+    for (let r = headerRow + 1; r <= range.e.r; ++r) {
+      // Đọc dữ liệu hàng này
+      const firstCell = sheet[xlsx.utils.encode_cell({c: range.s.c, r})];
+      const secondCell = sheet[xlsx.utils.encode_cell({c: range.s.c + 1, r})];
+      if (firstCell && typeof firstCell.v === 'string' && isRomanNumeral(firstCell.v.trim())) {
+        // Gặp số La Mã (I, II...), ghi nhận lại là nhóm cha
+        currentGroup = firstCell.v.trim();
+        // Tên nhóm cha = nội dung ở các cột còn lại, lấy luôn text cột nào có (thường là cột B)
+        currentGroupName = secondCell && secondCell.v ? secondCell.v.toString().trim() : '';
+        continue;
+      }
+      // Gặp mã I.1, I.2... (sub group)
+      if (firstCell && typeof firstCell.v === 'string' && /^[IVXLCDM]+\.[0-9]+$/.test(firstCell.v.trim())) {
+        currentSubGroup = firstCell.v.trim();
+        currentSubGroupName = secondCell && secondCell.v ? secondCell.v.toString().trim() : '';
+      }
+
+      // Nếu dòng này là dữ liệu thì lấy
+      let rowObj = {};
+      // Lấy từng trường
+      for (const key in headerIndexes) {
+        const colIdx = headerIndexes[key];
+        const cell = sheet[xlsx.utils.encode_cell({c: colIdx, r})];
+        let val = cell && cell.v ? cell.v : '';
+        if (typeof val === 'number') val = val.toString();
+        rowObj[key] = val;
+      }
+
+      // Nếu dòng là dữ liệu hợp lệ (ít nhất phải có công việc hoặc mã nhóm con)
+      if (rowObj["Công việc"] || currentSubGroup) {
+        results.push({
+          group: currentGroup,
+          group_name: currentGroupName,
+          sub_group: currentSubGroup,
+          sub_group_name: currentSubGroupName,
+          task_name: rowObj["Công việc"] || '',
+          ly_trinh: rowObj["Lý trình"] || '',
+          unit: rowObj["Đơn vị"] || '',
+          thiet_ke: rowObj["Thiết kế"] || '',
+          percent_week: rowObj["% hoàn thành trong tuần"] || '',
+          percent_duan: rowObj["% hoàn thiện theo dự án"] || '',
+          note: rowObj["Ghi chú"] || '',
+          fromDate, toDate
+        });
+      }
+    }
+  }
+  return results;
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Chỉ chấp nhận POST' });
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
   }
 
   const form = new formidable.IncomingForm();
-
   form.parse(req, async (err, fields, files) => {
+    if (err) {
+      res.status(400).json({ error: 'Form parse error' });
+      return;
+    }
     try {
-      if (err) {
-        console.log("FORMIDABLE ERROR:", err);
-        return res.status(400).json({ error: "Lỗi upload form" });
+      const { fromDate, toDate } = fields;
+      if (!files.file) {
+        res.status(400).json({ error: 'No file uploaded' });
+        return;
       }
+      const filePath = files.file.path;
+      const dataRows = await parseExcel(filePath, fromDate, toDate);
 
-      // Chuẩn hóa lấy giá trị trường ngày
-      const getField = v => (Array.isArray(v) ? v[0] : v);
+      // Xoá dữ liệu cũ nếu trùng fromDate-toDate
+      await pool.query('DELETE FROM weekly_reports WHERE from_date=$1 AND to_date=$2', [fromDate, toDate]);
 
-      const fromDate = getField(fields.fromDate);
-      const toDate = getField(fields.toDate);
-      const file = files.file?.[0] || files.file;
-
-      // Kiểm tra định dạng ngày yyyy-mm-dd
-      const isDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
-      if (!isDate(fromDate) || !isDate(toDate)) {
-        return res.status(400).json({ error: 'fromDate/toDate phải là yyyy-mm-dd' });
-      }
-      if (!file) {
-        return res.status(400).json({ error: 'Thiếu file báo cáo tuần' });
-      }
-
-      // Đọc file excel
-      const filePath = file.filepath || file.path;
-      const workbook = xlsx.readFile(filePath);
-
-      // Tìm sheet bắt đầu bằng 'BC tuần'
-      const sheetName = workbook.SheetNames.find(n => n.trim().toLowerCase().startsWith('bc tuần'));
-      if (!sheetName) {
-        return res.status(400).json({ error: 'Không tìm thấy sheet báo cáo tuần' });
-      }
-      const ws = workbook.Sheets[sheetName];
-      const rows = xlsx.utils.sheet_to_json(ws, { header: 1, raw: false });
-
-      // --- Bước 1: Tìm dòng tiêu đề đúng ---
-      let headerRowIdx = -1;
-      let colMap = {};
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i].map(cell => (cell ? cell.toString().toLowerCase().replace(/\s+/g, '') : ''));
-        if (
-          row.includes('côngviệc') &&
-          row.includes('lýtrình') &&
-          row.includes('đơnvị') &&
-          row.includes('thiếtkế') &&
-          row.find(cell => (cell || '').includes('hoànthànhtrongtuần')) !== undefined &&
-          row.find(cell => (cell || '').includes('hoànthiệntheodựán')) !== undefined
-        ) {
-          headerRowIdx = i;
-          const originalRow = rows[i];
-          colMap = {
-            stt: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '') === 'stt'),
-            task_name: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '') === 'côngviệc'),
-            ly_trinh: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '') === 'lýtrình'),
-            unit: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '') === 'đơnvị'),
-            thiet_ke: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '') === 'thiếtkế'),
-            percent_week: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '').includes('hoànthànhtrongtuần')),
-            percent_duan: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '').includes('hoànthiệntheodựán')),
-            note: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '').includes('ghichú')),
-          };
-          break;
-        }
-      }
-
-      if (headerRowIdx === -1) {
-        return res.status(400).json({ error: 'Không tìm thấy dòng tiêu đề bảng công việc!' });
-      }
-
-      // --- Bước 2: Lấy dữ liệu từng dòng dưới tiêu đề ---
-      let data = [];
-      let currentGroup = '';
-      for (let i = headerRowIdx + 1; i < rows.length; i++) {
-        const row = rows[i];
-        if (!row || row.every(cell => !cell || cell === '')) break;
-
-        // Nếu dòng bắt đầu bằng số La Mã (I, II, III...) => cập nhật currentGroup
-        const sttCell = row[colMap.stt];
-        if (typeof sttCell === 'string' && /^[IVXLCDM]+\b/.test(sttCell.trim())) {
-          currentGroup = row[colMap.task_name] || '';
-          continue;
-        }
-
-        // Nếu là dòng công việc thật sự (task_name không rỗng)
-        if (row[colMap.task_name] && row[colMap.task_name].toString().trim()) {
-          data.push({
-            group: currentGroup,
-            task_name: row[colMap.task_name] || '',
-            ly_trinh: row[colMap.ly_trinh] || '',
-            unit: row[colMap.unit] || '',
-            thiet_ke: row[colMap.thiet_ke] || '',
-            percent_week: row[colMap.percent_week] || '',
-            percent_duan: row[colMap.percent_duan] || '',
-            note: row[colMap.note] || ''
-          });
-        }
-      }
-
-      // Kết nối và lưu vào CSDL Neon
-      const client = new Client({ connectionString: PG_CONNECTION_STRING, ssl: { rejectUnauthorized: false } });
-      await client.connect();
-
-      // Kiểm tra báo cáo tuần đã tồn tại chưa
-      const check = await client.query(
-        'SELECT * FROM weekly_reports WHERE from_date = $1 AND to_date = $2',
-        [fromDate, toDate]
-      );
-      if (check.rows.length) {
-        await client.end();
-        return res.status(400).json({ error: 'Báo cáo tuần này đã tồn tại!' });
-      }
-
-      // Lưu vào weekly_reports
-      const { rows: repRows } = await client.query(
-        'INSERT INTO weekly_reports (from_date, to_date) VALUES ($1, $2) RETURNING id',
-        [fromDate, toDate]
-      );
-      const reportId = repRows[0]?.id;
-
-      // Lưu từng task vào report_tasks
-      for (const r of data) {
-        await client.query(
-          `INSERT INTO report_tasks 
-          (report_id, group_name, task_name, ly_trinh, unit, thiet_ke, percent_week, percent_duan, note) 
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-          [reportId, r.group, r.task_name, r.ly_trinh, r.unit, r.thiet_ke, r.percent_week, r.percent_duan, r.note]
+      // Ghi dữ liệu mới
+      for (const row of dataRows) {
+        await pool.query(
+          `INSERT INTO weekly_reports
+            (group, group_name, sub_group, sub_group_name, task_name, ly_trinh, unit, thiet_ke, percent_week, percent_duan, note, from_date, to_date)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [
+            row.group,
+            row.group_name,
+            row.sub_group,
+            row.sub_group_name,
+            row.task_name,
+            row.ly_trinh,
+            row.unit,
+            row.thiet_ke,
+            row.percent_week,
+            row.percent_duan,
+            row.note,
+            row.fromDate,
+            row.toDate
+          ]
         );
       }
-
-      await client.end();
-      return res.status(200).json({ success: true, message: 'Tải lên thành công!' });
-
-    } catch (err) {
-      console.log("UPLOAD MAIN ERROR:", err);
-      return res.status(400).json({ error: err.message || "Lỗi upload không xác định" });
+      res.json({ success: true, rows: dataRows.length });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
     }
   });
 }
