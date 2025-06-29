@@ -1,19 +1,13 @@
 // pages/api/upload-report.js
 import formidable from 'formidable-serverless';
-import fs from 'fs';
 import xlsx from 'xlsx';
 import { Pool } from 'pg';
 
-// Chỉnh lại kết nối cho đúng của bạn
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL
 });
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+export const config = { api: { bodyParser: false } };
 
 function isRomanNumeral(str) {
   return /^[IVXLCDM]+\.*$/.test(str.trim());
@@ -39,7 +33,7 @@ function findHeaderRow(sheet) {
         }
       }
     }
-    if (found >= headers.length - 1) { // Chỉ cần gần đủ cột, có thể thiếu 1
+    if (found >= headers.length - 1) {
       return { row, headerIndexes };
     }
   }
@@ -61,25 +55,19 @@ async function parseExcel(filePath, fromDate, toDate) {
     let currentSubGroup = '';
     let currentSubGroupName = '';
     for (let r = headerRow + 1; r <= range.e.r; ++r) {
-      // Đọc dữ liệu hàng này
       const firstCell = sheet[xlsx.utils.encode_cell({c: range.s.c, r})];
       const secondCell = sheet[xlsx.utils.encode_cell({c: range.s.c + 1, r})];
       if (firstCell && typeof firstCell.v === 'string' && isRomanNumeral(firstCell.v.trim())) {
-        // Gặp số La Mã (I, II...), ghi nhận lại là nhóm cha
         currentGroup = firstCell.v.trim();
-        // Tên nhóm cha = nội dung ở các cột còn lại, lấy luôn text cột nào có (thường là cột B)
         currentGroupName = secondCell && secondCell.v ? secondCell.v.toString().trim() : '';
         continue;
       }
-      // Gặp mã I.1, I.2... (sub group)
       if (firstCell && typeof firstCell.v === 'string' && /^[IVXLCDM]+\.[0-9]+$/.test(firstCell.v.trim())) {
         currentSubGroup = firstCell.v.trim();
         currentSubGroupName = secondCell && secondCell.v ? secondCell.v.toString().trim() : '';
       }
 
-      // Nếu dòng này là dữ liệu thì lấy
       let rowObj = {};
-      // Lấy từng trường
       for (const key in headerIndexes) {
         const colIdx = headerIndexes[key];
         const cell = sheet[xlsx.utils.encode_cell({c: colIdx, r})];
@@ -88,12 +76,11 @@ async function parseExcel(filePath, fromDate, toDate) {
         rowObj[key] = val;
       }
 
-      // Nếu dòng là dữ liệu hợp lệ (ít nhất phải có công việc hoặc mã nhóm con)
       if (rowObj["Công việc"] || currentSubGroup) {
         results.push({
-          group: currentGroup,
+          group_code: currentGroup,
           group_name: currentGroupName,
-          sub_group: currentSubGroup,
+          sub_group_code: currentSubGroup,
           sub_group_name: currentSubGroupName,
           task_name: rowObj["Công việc"] || '',
           ly_trinh: rowObj["Lý trình"] || '',
@@ -138,12 +125,12 @@ export default async function handler(req, res) {
       for (const row of dataRows) {
         await pool.query(
           `INSERT INTO weekly_reports
-            (group, group_name, sub_group, sub_group_name, task_name, ly_trinh, unit, thiet_ke, percent_week, percent_duan, note, from_date, to_date)
+            (group_code, group_name, sub_group_code, sub_group_name, task_name, ly_trinh, unit, thiet_ke, percent_week, percent_duan, note, from_date, to_date)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
           [
-            row.group,
+            row.group_code,
             row.group_name,
-            row.sub_group,
+            row.sub_group_code,
             row.sub_group_name,
             row.task_name,
             row.ly_trinh,
