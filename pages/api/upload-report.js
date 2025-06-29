@@ -59,21 +59,20 @@ export default async function handler(req, res) {
           row.includes('lýtrình') &&
           row.includes('đơnvị') &&
           row.includes('thiếtkế') &&
-          row.find(cell => cell.includes('hoànthànhtrongtuần')) !== undefined &&
-          row.find(cell => cell.includes('hoànthiệntheodựán')) !== undefined
+          row.find(cell => (cell || '').includes('hoànthànhtrongtuần')) !== undefined &&
+          row.find(cell => (cell || '').includes('hoànthiệntheodựán')) !== undefined
         ) {
           headerRowIdx = i;
-          // Lưu lại index các cột
           const originalRow = rows[i];
           colMap = {
-            stt: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '') === 'stt'),
-            task_name: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '') === 'côngviệc'),
-            ly_trinh: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '') === 'lýtrình'),
-            unit: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '') === 'đơnvị'),
-            thiet_ke: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '') === 'thiếtkế'),
-            percent_week: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '').includes('hoànthànhtrongtuần')),
-            percent_duan: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '').includes('hoànthiệntheodựán')),
-            note: originalRow.findIndex(cell => cell && cell.toString().toLowerCase().replace(/\s+/g, '').includes('ghichú')),
+            stt: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '') === 'stt'),
+            task_name: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '') === 'côngviệc'),
+            ly_trinh: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '') === 'lýtrình'),
+            unit: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '') === 'đơnvị'),
+            thiet_ke: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '') === 'thiếtkế'),
+            percent_week: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '').includes('hoànthànhtrongtuần')),
+            percent_duan: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '').includes('hoànthiệntheodựán')),
+            note: originalRow.findIndex(cell => (cell || '').toString().toLowerCase().replace(/\s+/g, '').includes('ghichú')),
           };
           break;
         }
