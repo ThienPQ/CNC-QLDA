@@ -1,0 +1,20 @@
+group_code,group_name,sub_code,sub_name,ly_trinh,unit,thiet_ke,percent_week,percent_duan,note,from_date,to_date
+I,Giao thông,I.1,Tuyến nội khu,,m3,1636.57,100,100,,2025-06-09,2025-06-15
+I,Giao thông,1,Vét hữu cơ,,m3,1636.57,100,100,,2025-06-09,2025-06-15
+I,Giao thông,2,Đào cấp,đào nền,khuôn đường,#REF!,m3,29504.07,24,65,,2025-06-09,2025-06-15
+I,Giao thông,3,Đắp nền K90,Km0+900-Km1+16.75,m3,11361.14,143,76,,2025-06-09,2025-06-15
+I,Giao thông,4,Đắp nền K95,Km0+900-Km1+16.75,m3,4962.18,82,87,,2025-06-09,2025-06-15
+I,Giao thông,I.2,Tuyến số 2,,m3,6574.12,0,43,,2025-06-09,2025-06-15
+I,Giao thông,1,Vét hữu cơ,#REF!,m3,6574.12,0,43,,2025-06-09,2025-06-15
+I,Giao thông,2,Đào cấp,đào nền,khuôn đường,#REF!,m3,3713.63,3,3,,2025-06-09,2025-06-15
+I,Giao thông,3,Đắp nền K90,#REF!,m3,36233.86,80,3,"ảnh hưởng mưa",2025-06-09,2025-06-15
+I,Giao thông,4,Đắp nền K95,#REF!,m3,18387.74,80,4,"ảnh hưởng mưa",2025-06-09,2025-06-15
+II,Thoát nước mưa,II.1,Tuyến Cải tạo,,,,,,,2025-06-09,2025-06-15
+II,Thoát nước mưa,1,Thi công đào móng ga cống,Từ G7 đến G14,m3,1374.58,#REF!,#REF!,"Vướng mặt bằng thi công (công trình ngầm)",2025-06-09,2025-06-15
+II,Thoát nước mưa,2,Thi công lớp cát đệm đầm chặt K95,Từ G7 đến G14,m3,44.71,#REF!,#REF!,"Vướng mặt bằng thi công (công trình ngầm)",2025-06-09,2025-06-15
+I,Giao thông,I.3,Tuyến cải tạo và nút giao H3,,,,,,,2025-06-16,2025-06-22
+I,Giao thông,1,Thi công lớp bê tông nhựa mặt đường dày 5cm,Lý trình 5+000 đến 5+500,m2,1500,80,90,"Đã hoàn thành đúng tiến độ",2025-06-16,2025-06-22
+I,Giao thông,2,Đắp nền K98,Lý trình 5+000 đến 5+500,m3,1000,70,80,"Đã đạt 80% tiến độ, còn lại do mưa",2025-06-16,2025-06-22
+II,Thoát nước mưa,II.2,Tuyến thoát nước QL21,,,,,,,2025-06-16,2025-06-22
+II,Thoát nước mưa,1,Đào mương thoát nước QL21,Lý trình 0+100 đến 0+800,m,700,60,80,,2025-06-16,2025-06-22
+II,Thoát nước mưa,2,Lắp đặt cống D800,Lý trình 0+100 đến 0+800,cái,20,50,60,"Còn vướng 2 vị trí mặt bằng",2025-06-16,2025-06-22
