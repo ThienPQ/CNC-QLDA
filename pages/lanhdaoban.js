@@ -1,179 +1,130 @@
+// pages/lanhdaoban.js
 import { useEffect, useState } from "react";
 
-// --- Chuẩn hóa tên công việc mạnh mẽ ---
-const STOPWORDS = [
-  "công", "việc", "thi", "công", "xây", "dựng", "hạng", "mục", "lắp", "đặt", "làm",
-  "và", "các", "của", "bằng", "trên", "tại", "theo", "cho", "đến", "kèm", "như", "bổ sung"
-];
-function normalizeTaskName(str) {
+function normalizeText(str) {
+  // Chuẩn hóa: viết thường, bỏ dấu, bỏ cách thừa, giữ lại ký tự số/ chữ
   if (!str) return "";
-  let s = str.normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // bỏ dấu tiếng Việt
     .replace(/\s+/g, " ")
+    .replace(/[^a-zA-Z0-9 ]/g, "") // chỉ giữ số/chữ/cách
+    .toLowerCase()
     .trim();
-  let arr = s.split(" ").filter(w => w && !STOPWORDS.includes(w));
-  return arr.join(" ");
 }
-function findBestMatch(taskName, plhdTasks) {
-  if (!taskName) return null;
-  const n1 = normalizeTaskName(taskName);
-  let best = null, bestScore = 0;
-  for (const t of plhdTasks) {
-    const n2 = normalizeTaskName(t.sub_name);
-    if (!n2) continue;
+
+function similar(a, b) {
+  // so khớp "tương tự" (đủ dùng với báo cáo thực tế)
+  return normalizeText(a) === normalizeText(b) || normalizeText(a).includes(normalizeText(b)) || normalizeText(b).includes(normalizeText(a));
+}
+
+function findBestMatch(sub_name, taskList) {
+  if (!sub_name) return null;
+  // Tìm công việc khớp nhất
+  let normSub = normalizeText(sub_name);
+  let best = null;
+  let bestScore = 0;
+  for (const t of taskList) {
+    let normTask = normalizeText(t.sub_name);
     let score = 0;
-    if (n1 === n2) score = 100;
-    else if (n1.includes(n2) || n2.includes(n1)) score = 80;
+    if (normSub === normTask) score = 2;
+    else if (normTask.includes(normSub) || normSub.includes(normTask)) score = 1;
     else {
-      const set1 = new Set(n1.split(" ")), set2 = new Set(n2.split(" "));
-      score = [...set1].filter(x => set2.has(x)).length * 10;
+      // so khớp từ khoá
+      let matches = normSub.split(" ").filter(x => normTask.includes(x));
+      score = matches.length;
     }
-    if (score > bestScore) { bestScore = score; best = t; }
-  }
-  return bestScore >= 20 ? best : null;
-}
-
-// --- Gom nhóm, cộng dồn ---
-function groupByCategory(rows) {
-  let result = {};
-  for (const row of rows) {
-    if (!row.group_code) continue;
-    if (!result[row.group_code]) result[row.group_code] = { group_name: row.group_name, details: [] };
-    result[row.group_code].details.push(row);
-  }
-  return result;
-}
-function mergeReports(reports) {
-  let map = {};
-  for (let r of reports) {
-    const key = [r.group_code, normalizeTaskName(r.sub_name), r.unit].join("|");
-    if (!map[key]) {
-      map[key] = { ...r, thiet_ke: parseFloat(r.thiet_ke) || 0, percent_week: 0, percent_duan: 0 };
-      map[key]._all_notes = [];
-      if (r.note) map[key]._all_notes.push(r.note);
-    } else {
-      map[key].thiet_ke += parseFloat(r.thiet_ke) || 0;
-      map[key].percent_week = Math.max(map[key].percent_week, parseFloat(r.percent_week) || 0);
-      map[key].percent_duan = Math.max(map[key].percent_duan, parseFloat(r.percent_duan) || 0);
-      if (r.note) map[key]._all_notes.push(r.note);
+    if (score > bestScore) {
+      bestScore = score;
+      best = t;
     }
   }
-  for (const k in map) map[k].note = map[k]._all_notes.join("; ");
-  return Object.values(map);
-}
-
-function compareWithPrevWeek(merged, prev) {
-  let result = { nhanh: [], cham: [] };
-  for (let row of merged) {
-    const prevRow = prev.find(
-      x => normalizeTaskName(x.sub_name) === normalizeTaskName(row.sub_name) && x.unit === row.unit && x.group_code === row.group_code
-    );
-    if (!prevRow) continue;
-    const d = parseFloat(row.thiet_ke) - parseFloat(prevRow.thiet_ke);
-    if (d > 0) result.nhanh.push({ ...row, tang: d });
-    else if (d < 0) result.cham.push({ ...row, giam: d });
-  }
-  return result;
+  // chỉ nhận nếu thực sự có điểm chung
+  return bestScore > 0 ? best : null;
 }
 
 export default function LanhDaoBan() {
-  const [weekly, setWeekly] = useState([]);        // Báo cáo tuần
-  const [tasks, setTasks] = useState([]);          // Hợp đồng
-  const [fromDate, setFromDate] = useState("2025-06-09");
+  const [weekly, setWeekly] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [fromDate, setFromDate] = useState("2025-06-16");
   const [toDate, setToDate] = useState("2025-06-22");
-  const [prevWeek, setPrevWeek] = useState([]);
-  const [aiAuto, setAiAuto] = useState("");
   const [aiResult, setAiResult] = useState("");
   const [loadingAI, setLoadingAI] = useState(false);
 
-  // --- Lấy dữ liệu báo cáo tuần ---
+  // Lấy báo cáo tuần
   useEffect(() => {
     fetch(`/api/get-weekly-reports?from_date=${fromDate}&to_date=${toDate}`)
       .then(res => res.json())
       .then(data => setWeekly(data?.data || []));
-    // Tuần trước
-    let prevTo = new Date(fromDate);
-    prevTo.setDate(prevTo.getDate() - 1);
-    let prevFrom = new Date(prevTo);
-    prevFrom.setDate(prevFrom.getDate() - 6);
-    fetch(`/api/get-weekly-reports?from_date=${prevFrom.toISOString().slice(0,10)}&to_date=${prevTo.toISOString().slice(0,10)}`)
-      .then(res => res.json())
-      .then(data => setPrevWeek(data?.data || []));
   }, [fromDate, toDate]);
 
-  // --- Lấy danh mục hợp đồng ---
+  // Lấy PLHĐ (project_tasks)
   useEffect(() => {
     fetch(`/api/get-project-tasks`)
       .then(res => res.json())
       .then(data => setTasks(data?.data || []));
   }, []);
 
-  // --- Xử lý cộng dồn ---
-  const merged = mergeReports(weekly.filter(r =>
-    r.from_date >= fromDate && r.to_date <= toDate
-  ));
-  const grouped = groupByCategory(merged);
-
-  // --- So sánh với tuần trước ---
-  const prevMerged = mergeReports(prevWeek);
-  const speedCompare = compareWithPrevWeek(merged, prevMerged);
-
-  // --- AI auto nhận xét tổng quan ---
-  useEffect(() => {
-    if (!merged.length || !tasks.length) { setAiAuto(""); return; }
-    let text = "";
-    for (const [code, group] of Object.entries(grouped)) {
-      text += `\n${code} - ${group.group_name}\n`;
-      for (const row of group.details) {
-        const matched = findBestMatch(row.sub_name, tasks);
-        let done = row.thiet_ke;
-        let contract = matched?.design_quantity || "";
-        let percent = contract ? ((done / contract) * 100).toFixed(1) : "";
-        let trend = "";
-        const isFast = speedCompare.nhanh.find(x => normalizeTaskName(x.sub_name) === normalizeTaskName(row.sub_name));
-        const isSlow = speedCompare.cham.find(x => normalizeTaskName(x.sub_name) === normalizeTaskName(row.sub_name));
-        if (isFast) trend = "Tăng tiến độ so với tuần trước.";
-        else if (isSlow) trend = "Giảm tiến độ hoặc dừng.";
-        text += `- ${row.sub_name}: ${done}/${contract} (${percent}%) ${trend}\n`;
-      }
+  // Gom nhóm, chuẩn hóa nhóm cha
+  function groupByCategory(data) {
+    let result = {};
+    for (const row of data) {
+      if (!row.group_code) continue;
+      if (!result[row.group_code]) result[row.group_code] = { group_name: row.group_name, details: [] };
+      result[row.group_code].details.push(row);
     }
-    setAiAuto(text.trim());
-  }, [merged, tasks, grouped, speedCompare]);
+    return result;
+  }
+  const grouped = groupByCategory(weekly);
 
-  // --- Đánh giá AI khi bấm nút ---
+  // Hàm gọi OpenAI GPT để đánh giá
   async function handleAIEval() {
     setLoadingAI(true);
-    const items = merged.filter(row => row.note && row.note.trim() !== "");
-    if (!items.length) {
-      setAiResult("Không có công việc nào có ghi chú.");
-      setLoadingAI(false);
-      return;
+    // Tạo chuỗi mô tả tình hình từng công việc
+    let items = [];
+    for (const row of weekly) {
+      const matched = findBestMatch(row.sub_name, tasks);
+      items.push({
+        group: row.group_name,
+        task: row.sub_name,
+        design_week: row.thiet_ke,
+        design_contract: matched?.design_quantity || "",
+        percent_contract: matched?.percent_duan || "",
+        note: row.note || "",
+      });
     }
-    let prompt = `
-Bạn là chuyên gia quản lý dự án. Với từng công việc dưới đây, hãy đánh giá tiến độ so với hợp đồng (nếu có), phân tích các vấn đề từ ghi chú, đề xuất hướng xử lý. Trình bày gọn, rõ ràng từng công việc.
+    // Tạo prompt cho AI
+    const prompt = `
+Bạn là một chuyên gia quản lý dự án giao thông. Hãy đọc các số liệu thực tế và hợp đồng dưới đây, đánh giá từng công việc đã đạt tiến độ chưa, so với hợp đồng, và đưa ra nhận xét/khuyến nghị cho từng công việc.
+Kết quả trình bày dạng markdown, tách theo từng nhóm (Giao thông, Thoát nước...), mỗi công việc có: tên, tiến độ thực tế, tiến độ hợp đồng, nhận xét, khuyến nghị nếu cần.
 
-${items.map((it, idx) => {
-  const matched = findBestMatch(it.sub_name, tasks);
-  return `${idx + 1}. Nhóm: ${it.group_name}, Công việc: ${it.sub_name}, Khối lượng lũy kế: ${it.thiet_ke} ${it.unit}, Hợp đồng: ${matched?.design_quantity || ""} ${it.unit}, Ghi chú: ${it.note}`;
-}).join("\n")}
+Số liệu:
+${items.map((it, idx) =>
+  `${idx + 1}. Nhóm: ${it.group}, Công việc: ${it.task}, Khối lượng báo cáo tuần: ${it.design_week}, Khối lượng hợp đồng: ${it.design_contract}, Ghi chú: ${it.note}`
+).join("\n")}
     `.trim();
+
     try {
-      const resp = await fetch("/api/gpt-eval", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const resp = await fetch('/api/gpt-eval', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt })
       });
       const json = await resp.json();
-      setAiResult(json.result || "Không lấy được đánh giá AI.");
+      setAiResult(json.result || "Lỗi khi lấy đánh giá AI.");
     } catch (err) {
       setAiResult("Lỗi khi gọi AI.");
     }
     setLoadingAI(false);
   }
 
-  // ======= HIỂN THỊ ==========
+  // Tự động chạy AI mỗi khi weekly và tasks sẵn sàng
+  useEffect(() => {
+    if (weekly.length && tasks.length) handleAIEval();
+    // eslint-disable-next-line
+  }, [weekly, tasks]);
+
+  // --- RENDER ---
   return (
     <div style={{ padding: 32 }}>
       <h1>Báo cáo tuần và đánh giá</h1>
@@ -183,7 +134,7 @@ ${items.map((it, idx) => {
         <label style={{ marginLeft: 16 }}>Đến ngày: </label>
         <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
       </div>
-      {!merged.length ? <div>Không có dữ liệu báo cáo.</div> :
+      {!weekly.length ? <div>Không có dữ liệu báo cáo.</div> :
         Object.entries(grouped).map(([code, { group_name, details }]) => (
           <div key={code} style={{ marginBottom: 32 }}>
             <h2>{code} - {group_name}</h2>
@@ -194,10 +145,11 @@ ${items.map((it, idx) => {
                   <th>Tên công việc</th>
                   <th>Lý trình</th>
                   <th>Đơn vị</th>
-                  <th>Thiết kế lũy kế</th>
-                  <th>Thiết kế HĐ</th>
-                  <th>% Hoàn thành HĐ</th>
+                  <th>Thiết kế (báo cáo tuần)</th>
+                  <th>Thiết kế (hợp đồng)</th>
+                  <th>% Hoàn thành so với HĐ</th>
                   <th>Ghi chú</th>
+                  <th>So khớp hợp đồng</th>
                 </tr>
               </thead>
               <tbody>
@@ -208,6 +160,7 @@ ${items.map((it, idx) => {
                     let val = parseFloat(row.thiet_ke) / parseFloat(matched.design_quantity) * 100;
                     percent = isNaN(val) ? "" : val.toFixed(1) + "%";
                   }
+                  let soKhop = matched ? "Khớp công việc hợp đồng" : "Không khớp công việc hợp đồng";
                   return (
                     <tr key={row.id || row.sub_code || idx}>
                       <td>{idx + 1}</td>
@@ -215,9 +168,10 @@ ${items.map((it, idx) => {
                       <td>{row.ly_trinh}</td>
                       <td>{row.unit}</td>
                       <td>{row.thiet_ke}</td>
-                      <td>{matched?.design_quantity || ""}</td>
-                      <td>{percent}</td>
+                      <td>{matched?.design_quantity || "Không có trong hợp đồng"}</td>
+                      <td>{percent || "Không xác định"}</td>
                       <td>{row.note}</td>
+                      <td>{soKhop}</td>
                     </tr>
                   );
                 })}
@@ -226,24 +180,18 @@ ${items.map((it, idx) => {
           </div>
         ))
       }
-      {/* AI tự động nhận xét */}
-      <div style={{
-        background: "#eef7ff", padding: 18, borderRadius: 12,
-        fontFamily: "monospace", marginTop: 36
-      }}>
-        <b>AI tự động nhận xét tổng quan:</b>
-        <div style={{ marginTop: 10, whiteSpace: "pre-line" }}>{aiAuto}</div>
-      </div>
-      {/* Nút đánh giá AI */}
+
+      {/* Đánh giá AI */}
       <div style={{
         background: "#edfff0", padding: 18, borderRadius: 12,
-        fontFamily: "monospace", marginTop: 24
+        fontFamily: "monospace", marginTop: 36
       }}>
-        <b>Đánh giá AI chi tiết từng công việc có ghi chú:</b><br />
-        <button onClick={handleAIEval} disabled={loadingAI} style={{ margin: 12, padding: "8px 20px", background: "#41e09a", borderRadius: 8, fontWeight: 600 }}>
-          {loadingAI ? "Đang đánh giá..." : "Đánh giá AI"}
-        </button>
-        <div style={{ marginTop: 10, whiteSpace: "pre-line" }}>{aiResult}</div>
+        <b>Đánh giá AI tổng hợp tự động:</b>
+        <div style={{ marginTop: 10 }}>
+          {loadingAI ? "Đang lấy đánh giá AI..." :
+            <div dangerouslySetInnerHTML={{ __html: aiResult.replace(/\n/g, "<br/>") }} />
+          }
+        </div>
       </div>
     </div>
   );
