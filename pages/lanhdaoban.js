@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 
-// Bộ stopword tiếng Việt để so khớp mạnh hơn
+// --- Chuẩn hóa tên công việc mạnh mẽ ---
 const STOPWORDS = [
   "công", "việc", "thi", "công", "xây", "dựng", "hạng", "mục", "lắp", "đặt", "làm",
   "và", "các", "của", "bằng", "trên", "tại", "theo", "cho", "đến", "kèm", "như", "bổ sung"
 ];
-
-// Chuẩn hóa cực mạnh tên công việc
 function normalizeTaskName(str) {
   if (!str) return "";
   let s = str.normalize("NFD")
@@ -15,12 +13,9 @@ function normalizeTaskName(str) {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  // Loại stopword
   let arr = s.split(" ").filter(w => w && !STOPWORDS.includes(w));
   return arr.join(" ");
 }
-
-// Tìm công việc hợp đồng gần giống nhất
 function findBestMatch(taskName, plhdTasks) {
   if (!taskName) return null;
   const n1 = normalizeTaskName(taskName);
@@ -32,17 +27,15 @@ function findBestMatch(taskName, plhdTasks) {
     if (n1 === n2) score = 100;
     else if (n1.includes(n2) || n2.includes(n1)) score = 80;
     else {
-      // số từ chung (dùng Set giao)
       const set1 = new Set(n1.split(" ")), set2 = new Set(n2.split(" "));
       score = [...set1].filter(x => set2.has(x)).length * 10;
     }
     if (score > bestScore) { bestScore = score; best = t; }
   }
-  // Nếu không tìm được gì khớp thì trả về null
   return bestScore >= 20 ? best : null;
 }
 
-// Gom nhóm theo hạng mục cha
+// --- Gom nhóm, cộng dồn ---
 function groupByCategory(rows) {
   let result = {};
   for (const row of rows) {
@@ -52,8 +45,6 @@ function groupByCategory(rows) {
   }
   return result;
 }
-
-// Gộp/cộng dồn các tuần cho từng công việc (dựa vào chuẩn hóa tên + đơn vị + hạng mục cha)
 function mergeReports(reports) {
   let map = {};
   for (let r of reports) {
@@ -64,7 +55,6 @@ function mergeReports(reports) {
       if (r.note) map[key]._all_notes.push(r.note);
     } else {
       map[key].thiet_ke += parseFloat(r.thiet_ke) || 0;
-      // Chỉ cộng lũy kế, không cộng % tuần/dự án (lấy giá trị lớn nhất)
       map[key].percent_week = Math.max(map[key].percent_week, parseFloat(r.percent_week) || 0);
       map[key].percent_duan = Math.max(map[key].percent_duan, parseFloat(r.percent_duan) || 0);
       if (r.note) map[key]._all_notes.push(r.note);
@@ -74,7 +64,6 @@ function mergeReports(reports) {
   return Object.values(map);
 }
 
-// So sánh với tuần trước: trả về { nhanh: [], cham: [] }
 function compareWithPrevWeek(merged, prev) {
   let result = { nhanh: [], cham: [] };
   for (let row of merged) {
@@ -99,12 +88,12 @@ export default function LanhDaoBan() {
   const [aiResult, setAiResult] = useState("");
   const [loadingAI, setLoadingAI] = useState(false);
 
-  // Lấy toàn bộ dữ liệu báo cáo tuần trong khoảng từ ngày đến ngày
+  // --- Lấy dữ liệu báo cáo tuần ---
   useEffect(() => {
-    fetch(`/api/get-weekly-reports?from_date=2025-06-09&to_date=${toDate}`)
+    fetch(`/api/get-weekly-reports?from_date=${fromDate}&to_date=${toDate}`)
       .then(res => res.json())
       .then(data => setWeekly(data?.data || []));
-    // Tuần trước (giả sử mỗi tuần là 7 ngày)
+    // Tuần trước
     let prevTo = new Date(fromDate);
     prevTo.setDate(prevTo.getDate() - 1);
     let prevFrom = new Date(prevTo);
@@ -114,26 +103,26 @@ export default function LanhDaoBan() {
       .then(data => setPrevWeek(data?.data || []));
   }, [fromDate, toDate]);
 
-  // Lấy danh mục hợp đồng
+  // --- Lấy danh mục hợp đồng ---
   useEffect(() => {
     fetch(`/api/get-project-tasks`)
       .then(res => res.json())
       .then(data => setTasks(data?.data || []));
   }, []);
 
-  // Tổng hợp báo cáo lũy kế tới thời điểm xem
+  // --- Xử lý cộng dồn ---
   const merged = mergeReports(weekly.filter(r =>
-    r.from_date >= "2025-06-09" && r.to_date <= toDate
+    r.from_date >= fromDate && r.to_date <= toDate
   ));
   const grouped = groupByCategory(merged);
 
-  // Tổng hợp tuần trước để so sánh nhanh/chậm
+  // --- So sánh với tuần trước ---
   const prevMerged = mergeReports(prevWeek);
   const speedCompare = compareWithPrevWeek(merged, prevMerged);
 
-  // AI tự động nhận xét tổng quan: so sánh tiến độ với hợp đồng, nhanh/chậm với tuần trước
+  // --- AI auto nhận xét tổng quan ---
   useEffect(() => {
-    if (!merged.length || !tasks.length) return;
+    if (!merged.length || !tasks.length) { setAiAuto(""); return; }
     let text = "";
     for (const [code, group] of Object.entries(grouped)) {
       text += `\n${code} - ${group.group_name}\n`;
@@ -153,7 +142,7 @@ export default function LanhDaoBan() {
     setAiAuto(text.trim());
   }, [merged, tasks, grouped, speedCompare]);
 
-  // Khi bấm Đánh giá AI
+  // --- Đánh giá AI khi bấm nút ---
   async function handleAIEval() {
     setLoadingAI(true);
     const items = merged.filter(row => row.note && row.note.trim() !== "");
@@ -171,7 +160,6 @@ ${items.map((it, idx) => {
 }).join("\n")}
     `.trim();
     try {
-      // Đã có API gpt-eval
       const resp = await fetch("/api/gpt-eval", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
