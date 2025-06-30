@@ -1,4 +1,3 @@
-// pages/lanhdaoban.js
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
@@ -17,8 +16,8 @@ export default function LanhDaoBan() {
         const res = await axios.get('/api/get-weekly-reports', {
           params: { from_date: fromDate, to_date: toDate }
         });
-        setData(res.data.reports);
-        setTasks(res.data.tasks);
+        setData(Array.isArray(res.data.reports) ? res.data.reports : []);
+        setTasks(Array.isArray(res.data.tasks) ? res.data.tasks : []);
       } catch (err) {
         setError('Không thể tải dữ liệu báo cáo');
         setData([]);
@@ -29,23 +28,21 @@ export default function LanhDaoBan() {
   }, [fromDate, toDate]);
 
   useEffect(() => {
-    // Cộng dồn các công việc cùng mã sub_code
     let groupedData = {};
+    if (!Array.isArray(data)) return;
     data.forEach(row => {
-      // Nhóm theo group_code (I, II...)
+      if (!row || !row.group_code) return;
       if (!groupedData[row.group_code]) {
         groupedData[row.group_code] = {
           name: row.group_name,
           items: {}
         };
       }
-      // Nhóm theo sub_code (I.1, I.2...)
       if (!groupedData[row.group_code].items[row.sub_code]) {
         groupedData[row.group_code].items[row.sub_code] = { ...row, thiet_ke: 0, percent_week: 0, percent_duan: 0 };
       }
-      // Cộng dồn các giá trị cần thiết (ví dụ: thiet_ke, percent_week, percent_duan)
       groupedData[row.group_code].items[row.sub_code].thiet_ke += Number(row.thiet_ke || 0);
-      groupedData[row.group_code].items[row.sub_code].percent_week = Number(row.percent_week); // giữ giá trị tuần mới nhất
+      groupedData[row.group_code].items[row.sub_code].percent_week = Number(row.percent_week);
       groupedData[row.group_code].items[row.sub_code].percent_duan = Number(row.percent_duan);
       groupedData[row.group_code].items[row.sub_code].sub_name = row.sub_name;
       groupedData[row.group_code].items[row.sub_code].ly_trinh = row.ly_trinh;
@@ -55,15 +52,14 @@ export default function LanhDaoBan() {
     setGrouped(groupedData);
   }, [data]);
 
-  // Hàm lấy số liệu thiết kế hợp đồng từ bảng tasks
   const getContractValue = (subName) => {
+    if (!Array.isArray(tasks)) return '';
     const task = tasks.find(t =>
       t.task_name?.trim() === subName?.trim()
     );
     return task ? task.design_quantity : '';
   };
 
-  // Đánh giá AI tự động tổng hợp
   const renderAIEval = () => {
     let evals = [];
     Object.entries(grouped).forEach(([group_code, group]) => {
@@ -75,7 +71,7 @@ export default function LanhDaoBan() {
       });
     });
     return (
-      <div className="bg-green-100 p-4 mt-4 rounded">
+      <div style={{ background: "#ebfff0", padding: 16, marginTop: 16, borderRadius: 8 }}>
         <b>Đánh giá AI tổng hợp tự động:</b>
         <pre>{evals.join('\n')}</pre>
       </div>
@@ -137,7 +133,6 @@ export default function LanhDaoBan() {
           </div>
         ))
       }
-      {/* Đánh giá AI tự động */}
       {renderAIEval()}
     </div>
   );
