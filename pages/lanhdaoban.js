@@ -3,17 +3,84 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Hàm chuẩn hóa tên công việc (bỏ dấu, ký tự đặc biệt, về thường, bỏ cách thừa)
+
+// Hàm chuẩn hóa tên công việc (bỏ dấu, ký tự đặc biệt, số liệu, về thường, bỏ cách thừa, bỏ từ dừng)
 function normalizeString(str) {
   if (!str) return "";
-  return str
-    .toLowerCase()
+  const stopWords = [
+    "thi cong", "hang muc", "cong viec", "duong", "cau", "nut giao", "tuyen",
+    "bao cao", "hop dong", "cong trinh", "khoi luong", "bo sung", "nhua mat",
+    "dat", "lop", "xay dung", "thiet ke"
+  ];
+  let s = str.toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]/g, " ")
+    .replace(/[\u0300-\u036f]/g, "") // remove accents
+    .replace(/[^a-z0-9 ]/g, " ") // only keep alphanum
+    .replace(/\d+/g, " ") // remove numbers
     .replace(/\s+/g, " ")
     .trim();
+  stopWords.forEach(sw => {
+    s = s.replace(new RegExp(`\\b${sw}\\b`, "g"), "");
+  });
+  return s.replace(/\s+/g, " ").trim();
 }
+
+// Tính similarity đơn giản giữa 2 chuỗi (Levenshtein distance ngắn gọn)
+function similarity(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  let longer = a.length > b.length ? a : b;
+  let shorter = a.length > b.length ? b : a;
+  let longerLength = longer.length;
+  if (longerLength === 0) return 1.0;
+  let editDistance = (s1, s2) => {
+    let costs = [];
+    for (let i = 0; i <= s1.length; i++) {
+      let lastValue = i;
+      for (let j = 0; j <= s2.length; j++) {
+        if (i === 0) costs[j] = j;
+        else if (j > 0) {
+          let newValue = costs[j - 1];
+          if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
+            newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+          }
+          costs[j - 1] = lastValue;
+          lastValue = newValue;
+        }
+      }
+      if (i > 0) costs[s2.length] = lastValue;
+    }
+    return costs[s2.length];
+  };
+  return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
+}
+
+// Tìm công việc hợp đồng gần giống nhất
+function findProjectTask(subName, projectTasks) {
+  const n1 = normalizeString(subName);
+  if (!n1) return null;
+  // 1. Exact or contains match
+  let found = projectTasks.find(pt => {
+    const n2 = normalizeString(pt.task_name);
+    return n1 === n2 || n2.includes(n1) || n1.includes(n2);
+  });
+  if (found) return found;
+  // 2. Similarity matching
+  let best = null;
+  let bestScore = 0.0;
+  for (let pt of projectTasks) {
+    const n2 = normalizeString(pt.task_name);
+    let score = similarity(n1, n2);
+    if (score > bestScore) {
+      bestScore = score;
+      best = pt;
+    }
+  }
+  // Nếu khớp trên 0.8 thì coi như hợp lệ
+  if (best && bestScore > 0.8) return best;
+  return null;
+}
+
 
 // So khớp gần giống tên công việc giữa báo cáo tuần và hợp đồng
 function findProjectTask(subName, projectTasks) {
