@@ -1,144 +1,168 @@
 // pages/lanhdaoban.js
 import { useEffect, useState } from "react";
+import Head from "next/head";
+import axios from "axios";
 
-function normalizeText(str) {
-  // Chuẩn hóa: viết thường, bỏ dấu, bỏ cách thừa, giữ lại ký tự số/ chữ
+// Hàm chuẩn hóa tên công việc (bỏ dấu, ký tự đặc biệt, về thường, bỏ cách thừa)
+function normalizeString(str) {
   if (!str) return "";
   return str
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // bỏ dấu tiếng Việt
-    .replace(/\s+/g, " ")
-    .replace(/[^a-zA-Z0-9 ]/g, "") // chỉ giữ số/chữ/cách
     .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-function similar(a, b) {
-  // so khớp "tương tự" (đủ dùng với báo cáo thực tế)
-  return normalizeText(a) === normalizeText(b) || normalizeText(a).includes(normalizeText(b)) || normalizeText(b).includes(normalizeText(a));
-}
-
-function findBestMatch(sub_name, taskList) {
-  if (!sub_name) return null;
-  // Tìm công việc khớp nhất
-  let normSub = normalizeText(sub_name);
-  let best = null;
-  let bestScore = 0;
-  for (const t of taskList) {
-    let normTask = normalizeText(t.sub_name);
-    let score = 0;
-    if (normSub === normTask) score = 2;
-    else if (normTask.includes(normSub) || normSub.includes(normTask)) score = 1;
-    else {
-      // so khớp từ khoá
-      let matches = normSub.split(" ").filter(x => normTask.includes(x));
-      score = matches.length;
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      best = t;
-    }
-  }
-  // chỉ nhận nếu thực sự có điểm chung
-  return bestScore > 0 ? best : null;
+// So khớp gần giống tên công việc giữa báo cáo tuần và hợp đồng
+function findProjectTask(subName, projectTasks) {
+  const n1 = normalizeString(subName);
+  if (!n1) return null;
+  return (
+    projectTasks.find(
+      (pt) =>
+        n1 === normalizeString(pt.task_name) ||
+        normalizeString(pt.task_name).includes(n1) ||
+        n1.includes(normalizeString(pt.task_name))
+    ) || null
+  );
 }
 
 export default function LanhDaoBan() {
-  const [weekly, setWeekly] = useState([]);
-  const [tasks, setTasks] = useState([]);
+  const [weeklyReports, setWeeklyReports] = useState([]);
+  const [projectTasks, setProjectTasks] = useState([]);
   const [fromDate, setFromDate] = useState("2025-06-16");
   const [toDate, setToDate] = useState("2025-06-22");
-  const [aiResult, setAiResult] = useState("");
-  const [loadingAI, setLoadingAI] = useState(false);
+  const [error, setError] = useState("");
 
-  // Lấy báo cáo tuần
   useEffect(() => {
-    fetch(`/api/get-weekly-reports?from_date=${fromDate}&to_date=${toDate}`)
-      .then(res => res.json())
-      .then(data => setWeekly(data?.data || []));
+    // Lấy dữ liệu báo cáo tuần
+    async function fetchWeeklyReports() {
+      try {
+        const res = await axios.get("/api/get-weekly-reports", {
+          params: { fromDate, toDate },
+        });
+        setWeeklyReports(res.data || []);
+        setError("");
+      } catch (err) {
+        setError("Không thể tải dữ liệu báo cáo");
+        setWeeklyReports([]);
+      }
+    }
+    // Lấy dữ liệu hợp đồng
+    async function fetchProjectTasks() {
+      try {
+        const res = await axios.get("/api/get-project-tasks");
+        setProjectTasks(res.data || []);
+      } catch (err) {
+        setProjectTasks([]);
+      }
+    }
+    fetchWeeklyReports();
+    fetchProjectTasks();
   }, [fromDate, toDate]);
 
-  // Lấy PLHĐ (project_tasks)
-  useEffect(() => {
-    fetch(`/api/get-project-tasks`)
-      .then(res => res.json())
-      .then(data => setTasks(data?.data || []));
-  }, []);
-
-  // Gom nhóm, chuẩn hóa nhóm cha
-  function groupByCategory(data) {
-    let result = {};
-    for (const row of data) {
-      if (!row.group_code) continue;
-      if (!result[row.group_code]) result[row.group_code] = { group_name: row.group_name, details: [] };
-      result[row.group_code].details.push(row);
+  // Gom nhóm theo hạng mục cha (group_code/group_name)
+  const grouped = {};
+  for (const row of weeklyReports) {
+    if (!grouped[row.group_code]) {
+      grouped[row.group_code] = {
+        group_name: row.group_name,
+        details: [],
+      };
     }
-    return result;
-  }
-  const grouped = groupByCategory(weekly);
-
-  // Hàm gọi OpenAI GPT để đánh giá
-  async function handleAIEval() {
-    setLoadingAI(true);
-    // Tạo chuỗi mô tả tình hình từng công việc
-    let items = [];
-    for (const row of weekly) {
-      const matched = findBestMatch(row.sub_name, tasks);
-      items.push({
-        group: row.group_name,
-        task: row.sub_name,
-        design_week: row.thiet_ke,
-        design_contract: matched?.design_quantity || "",
-        percent_contract: matched?.percent_duan || "",
-        note: row.note || "",
-      });
-    }
-    // Tạo prompt cho AI
-    const prompt = `
-Bạn là một chuyên gia quản lý dự án giao thông. Hãy đọc các số liệu thực tế và hợp đồng dưới đây, đánh giá từng công việc đã đạt tiến độ chưa, so với hợp đồng, và đưa ra nhận xét/khuyến nghị cho từng công việc.
-Kết quả trình bày dạng markdown, tách theo từng nhóm (Giao thông, Thoát nước...), mỗi công việc có: tên, tiến độ thực tế, tiến độ hợp đồng, nhận xét, khuyến nghị nếu cần.
-
-Số liệu:
-${items.map((it, idx) =>
-  `${idx + 1}. Nhóm: ${it.group}, Công việc: ${it.task}, Khối lượng báo cáo tuần: ${it.design_week}, Khối lượng hợp đồng: ${it.design_contract}, Ghi chú: ${it.note}`
-).join("\n")}
-    `.trim();
-
-    try {
-      const resp = await fetch('/api/gpt-eval', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
-      });
-      const json = await resp.json();
-      setAiResult(json.result || "Lỗi khi lấy đánh giá AI.");
-    } catch (err) {
-      setAiResult("Lỗi khi gọi AI.");
-    }
-    setLoadingAI(false);
+    grouped[row.group_code].details.push(row);
   }
 
-  // Tự động chạy AI mỗi khi weekly và tasks sẵn sàng
-  useEffect(() => {
-    if (weekly.length && tasks.length) handleAIEval();
-    // eslint-disable-next-line
-  }, [weekly, tasks]);
+  // Tính toán AI đánh giá so sánh với hợp đồng
+  function renderAIAssessment() {
+    if (!weeklyReports.length) return <div>Không có dữ liệu.</div>;
 
-  // --- RENDER ---
+    // Gom nhóm và tạo đánh giá cho từng nhóm cha
+    const result = Object.entries(grouped).map(([group_code, data], idx) => {
+      // Đánh giá từng công việc con
+      const rows = data.details.map((row) => {
+        const matched = findProjectTask(row.sub_name, projectTasks);
+        let contractDesign = matched ? matched.design_quantity : "";
+        let percentHD = "";
+        let status = "";
+        if (matched && matched.design_quantity && row.thiet_ke) {
+          // Tính phần trăm hoàn thành so với hợp đồng
+          let actual = parseFloat(row.thiet_ke);
+          let planned = parseFloat(matched.design_quantity);
+          if (planned > 0) percentHD = ((actual / planned) * 100).toFixed(1);
+          status = percentHD
+            ? `${percentHD}% so với hợp đồng`
+            : "Không xác định";
+        } else {
+          status = "Không có trong hợp đồng";
+        }
+        return (
+          <div key={row.sub_code || row.sub_name}>
+            + {row.sub_name}: {row.thiet_ke || 0} ({status})
+          </div>
+        );
+      });
+
+      return (
+        <div key={group_code} style={{ marginBottom: 8 }}>
+          <div>
+            <b>
+              - {group_code} {data.group_name}:
+            </b>
+          </div>
+          {rows}
+        </div>
+      );
+    });
+
+    return <div>Đánh giá tổng hợp tự động: {result}</div>;
+  }
+
   return (
-    <div style={{ padding: 32 }}>
-      <h1>Báo cáo tuần và đánh giá</h1>
-      <div style={{ marginBottom: 24 }}>
-        <label>Từ ngày: </label>
-        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
-        <label style={{ marginLeft: 16 }}>Đến ngày: </label>
-        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
+    <div className="p-4">
+      <Head>
+        <title>Báo cáo tuần và đánh giá</title>
+      </Head>
+      <h1 style={{ fontWeight: 800, fontSize: 40 }}>Báo cáo tuần và đánh giá</h1>
+
+      <div style={{ marginBottom: 12 }}>
+        <span>Từ ngày: </span>
+        <input
+          type="date"
+          value={fromDate}
+          onChange={(e) => setFromDate(e.target.value)}
+        />
+        <span style={{ marginLeft: 16 }}>Đến ngày: </span>
+        <input
+          type="date"
+          value={toDate}
+          onChange={(e) => setToDate(e.target.value)}
+        />
       </div>
-      {!weekly.length ? <div>Không có dữ liệu báo cáo.</div> :
-        Object.entries(grouped).map(([code, { group_name, details }]) => (
-          <div key={code} style={{ marginBottom: 32 }}>
-            <h2>{code} - {group_name}</h2>
-            <table border={1} cellPadding={6} cellSpacing={0} style={{ width: "100%", background: "#fff" }}>
+
+      {error && (
+        <div style={{ color: "red", fontWeight: 600 }}>{error}</div>
+      )}
+
+      {!error && weeklyReports.length === 0 && (
+        <div>Không có dữ liệu báo cáo.</div>
+      )}
+
+      {/* Hiển thị từng hạng mục cha */}
+      {Object.entries(grouped).map(([group_code, data]) => (
+        <div key={group_code} style={{ marginBottom: 28 }}>
+          <h2 style={{ fontWeight: 700, fontSize: 30 }}>
+            {group_code} - {data.group_name}
+          </h2>
+          {/* Với mỗi nhóm con */}
+          {data.details.length > 0 && (
+            <table
+              border={2}
+              cellPadding={8}
+              style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}
+            >
               <thead>
                 <tr>
                   <th>STT</th>
@@ -153,44 +177,64 @@ ${items.map((it, idx) =>
                 </tr>
               </thead>
               <tbody>
-                {details.map((row, idx) => {
-                  const matched = findBestMatch(row.sub_name, tasks);
-                  let percent = "";
-                  if (matched?.design_quantity && row.thiet_ke) {
-                    let val = parseFloat(row.thiet_ke) / parseFloat(matched.design_quantity) * 100;
-                    percent = isNaN(val) ? "" : val.toFixed(1) + "%";
+                {data.details.map((row, idx) => {
+                  const matched = findProjectTask(row.sub_name, projectTasks);
+                  const contractDesign = matched
+                    ? matched.design_quantity
+                    : "Không có trong hợp đồng";
+                  let percentHD = "";
+                  if (
+                    matched &&
+                    matched.design_quantity &&
+                    row.thiet_ke &&
+                    !isNaN(parseFloat(row.thiet_ke)) &&
+                    !isNaN(parseFloat(matched.design_quantity))
+                  ) {
+                    const actual = parseFloat(row.thiet_ke);
+                    const planned = parseFloat(matched.design_quantity);
+                    if (planned > 0)
+                      percentHD = ((actual / planned) * 100).toFixed(1) + "%";
                   }
-                  let soKhop = matched ? "Khớp công việc hợp đồng" : "Không khớp công việc hợp đồng";
                   return (
-                    <tr key={row.id || row.sub_code || idx}>
+                    <tr key={row.sub_code || row.sub_name}>
                       <td>{idx + 1}</td>
                       <td>{row.sub_name}</td>
                       <td>{row.ly_trinh}</td>
                       <td>{row.unit}</td>
                       <td>{row.thiet_ke}</td>
-                      <td>{matched?.design_quantity || "Không có trong hợp đồng"}</td>
-                      <td>{percent || "Không xác định"}</td>
+                      <td>{contractDesign}</td>
+                      <td>
+                        {percentHD ||
+                          (contractDesign === "Không có trong hợp đồng"
+                            ? ""
+                            : "Không xác định")}
+                      </td>
                       <td>{row.note}</td>
-                      <td>{soKhop}</td>
+                      <td>
+                        {matched
+                          ? "Khớp công việc hợp đồng"
+                          : "Không khớp công việc hợp đồng"}
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-          </div>
-        ))
-      }
+          )}
+        </div>
+      ))}
 
-      {/* Đánh giá AI */}
-      <div style={{
-        background: "#edfff0", padding: 18, borderRadius: 12,
-        fontFamily: "monospace", marginTop: 36
-      }}>
-        <b>Đánh giá AI tổng hợp tự động:</b>
-        <div style={{ marginTop: 10 }}>
-          {loadingAI ? "Đang lấy đánh giá AI..." :
-            <div dangerouslySetInnerHTML={{ __html: aiResult.replace(/\n/g, "<br/>") }} />
-          }
+      <div
+        style={{
+          marginTop: 24,
+          background: "#eaffea",
+          padding: 18,
+          borderRadius: 8,
+        }}
+      >
+        <b style={{ fontSize: 22 }}>Đánh giá AI tổng hợp tự động:</b>
+        <div style={{ marginTop: 6, fontFamily: "monospace" }}>
+          {renderAIAssessment()}
         </div>
       </div>
     </div>
