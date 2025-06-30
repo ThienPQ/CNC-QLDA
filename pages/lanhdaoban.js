@@ -1,160 +1,104 @@
-import { useEffect, useState } from 'react';
-import Head from 'next/head';
+// pages/lanhdaoban.js
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 
-// Hàm khớp tên công việc (chữ thường, loại bỏ khoảng trắng dư)
-function normalize(str) {
-  return (str || '').toLowerCase().replace(/\s+/g, ' ').trim();
-}
-function findTask(subName, projectTasks) {
-  const normName = normalize(subName);
-  return projectTasks.find(t => normalize(t.sub_name) === normName);
-}
-
 export default function LanhDaoBan() {
-  const [reports, setReports] = useState([]);
-  const [projectTasks, setProjectTasks] = useState([]);
-  const [fromDate, setFromDate] = useState('2025-06-16');
+  const [data, setData] = useState([]);
+  const [fromDate, setFromDate] = useState('2025-06-09');
   const [toDate, setToDate] = useState('2025-06-22');
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        // Lấy báo cáo tuần
-        const res1 = await axios.get(`/api/get-weekly-reports`, {
-          params: { from_date: fromDate, to_date: toDate },
-        });
-        setReports(Array.isArray(res1.data) ? res1.data : []);
-
-        // Lấy hợp đồng
-        const res2 = await axios.get(`/api/get-project-tasks`);
-        setProjectTasks(Array.isArray(res2.data) ? res2.data : []);
-        setError('');
-      } catch (err) {
-        setError('Không thể tải dữ liệu báo cáo');
-      }
-    }
-    fetchData();
+    axios
+      .get('/api/get-weekly-reports', { params: { fromDate, toDate } })
+      .then((res) => setData(res.data))
+      .catch(() => setError('Không thể tải dữ liệu báo cáo'));
   }, [fromDate, toDate]);
 
-  // Gom nhóm theo hạng mục cha (group_code, group_name)
-  const grouped = {};
-  reports.forEach(row => {
-    if (!grouped[row.group_code]) {
-      grouped[row.group_code] = {
-        group_name: row.group_name,
-        items: [],
-      };
-    }
-    grouped[row.group_code].items.push(row);
+  // Nhóm dữ liệu theo group_code (hạng mục cha)
+  const groupData = {};
+  data.forEach(item => {
+    if (!groupData[item.group_code]) groupData[item.group_code] = { name: item.group_name, subs: {} };
+    if (!groupData[item.group_code].subs[item.sub_code])
+      groupData[item.group_code].subs[item.sub_code] = { name: item.sub_name, rows: [] };
+    groupData[item.group_code].subs[item.sub_code].rows.push(item);
   });
 
-  // Tổng hợp đánh giá AI (giả lập logic đơn giản)
-  const aiEval = [];
-  Object.entries(grouped).forEach(([code, group]) => {
-    let groupStr = `- ${code} - ${group.group_name}:\n`;
-    group.items.forEach(item => {
-      const matched = findTask(item.sub_name, projectTasks);
-      if (!item.thiet_ke || isNaN(Number(item.thiet_ke))) return; // bỏ trống
-      if (!matched) {
-        groupStr += `  + ${item.sub_name}: Đã thực hiện ${item.thiet_ke} ${item.unit}, chưa có hợp đồng để so sánh.\n`;
-      } else if (!matched.thiet_ke || isNaN(Number(matched.thiet_ke)) || Number(matched.thiet_ke) === 0) {
-        groupStr += `  + ${item.sub_name}: Có báo cáo nhưng hợp đồng chưa ghi khối lượng (hoặc = 0).\n`;
-      } else {
-        const percent = ((Number(item.thiet_ke) / Number(matched.thiet_ke)) * 100).toFixed(1);
-        groupStr += `  + ${item.sub_name}: Đạt ${(percent > 100 ? 100 : percent)}% so với hợp đồng (${item.thiet_ke}/${matched.thiet_ke} ${item.unit}).\n`;
-      }
-    });
-    aiEval.push(groupStr);
-  });
+  // Cộng dồn các trường số
+  const sumField = (arr, field) => arr.reduce((acc, curr) => acc + (parseFloat(curr[field]) || 0), 0);
 
   return (
-    <div className="p-4">
-      <Head>
-        <title>Báo cáo tuần và đánh giá</title>
-      </Head>
-      <h1 style={{fontSize: "2.2rem", fontWeight: 700, marginBottom: 24}}>Báo cáo tuần và đánh giá</h1>
-      <div style={{marginBottom: 16}}>
+    <div style={{ padding: 20 }}>
+      <h1>Báo cáo tuần và đánh giá</h1>
+      <div style={{ marginBottom: 12 }}>
         <span>Từ ngày: </span>
-        <input
-          type="date"
-          value={fromDate}
-          onChange={e => setFromDate(e.target.value)}
-          style={{marginRight: 12}}
-        />
-        <span>Đến ngày: </span>
-        <input
-          type="date"
-          value={toDate}
-          onChange={e => setToDate(e.target.value)}
-        />
+        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+        <span> Đến ngày: </span>
+        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
       </div>
+      {error && <div style={{ color: "red" }}>{error}</div>}
 
-      {error && <p style={{ color: "red" }}>{error}</p>}
-
-      {!reports.length && <div>Không có dữ liệu báo cáo.</div>}
-
-      {Object.entries(grouped).map(([code, group], idx) => (
-        <div key={code}>
-          <h2 style={{fontSize: "2rem", fontWeight: 700, marginTop: 24}}>{code} - {group.group_name}</h2>
-          <table border={1} cellPadding={8} cellSpacing={0} style={{width: "100%", marginBottom: 16}}>
-            <thead>
-              <tr>
-                <th>STT</th>
-                <th>Tên công việc</th>
-                <th>Lý trình</th>
-                <th>Đơn vị</th>
-                <th>Thiết kế (báo cáo tuần)</th>
-                <th>Thiết kế (hợp đồng)</th>
-                <th>% Hoàn thành so với HĐ</th>
-                <th>Ghi chú</th>
-                <th>Đánh giá</th>
-              </tr>
-            </thead>
-            <tbody>
-              {group.items.map((item, i) => {
-                const matched = findTask(item.sub_name, projectTasks);
-                let designContract = '';
-                let percentContract = '';
-                let evalText = '';
-                if (matched && matched.thiet_ke && !isNaN(Number(matched.thiet_ke)) && Number(matched.thiet_ke) > 0) {
-                  designContract = matched.thiet_ke;
-                  percentContract = ((Number(item.thiet_ke) / Number(matched.thiet_ke)) * 100).toFixed(1);
-                  evalText = `${percentContract > 100 ? 100 : percentContract}% hợp đồng`;
-                } else if (matched) {
-                  designContract = '0';
-                  percentContract = '';
-                  evalText = 'Có báo cáo nhưng HĐ không ghi KL';
-                } else {
-                  designContract = 'Chưa có dữ liệu hợp đồng';
-                  percentContract = '';
-                  evalText = 'Chưa có dữ liệu hợp đồng';
-                }
-                return (
-                  <tr key={i}>
-                    <td>{i + 1}</td>
-                    <td>{item.sub_name}</td>
-                    <td>{item.ly_trinh}</td>
-                    <td>{item.unit}</td>
-                    <td>{item.thiet_ke}</td>
-                    <td>{designContract}</td>
-                    <td>{percentContract}</td>
-                    <td>{item.note}</td>
-                    <td>{evalText}</td>
+      {Object.keys(groupData).length === 0 ? (
+        <p>Không có dữ liệu báo cáo.</p>
+      ) : (
+        Object.entries(groupData).map(([group_code, group]) => (
+          <div key={group_code}>
+            <h2 style={{ marginTop: 20 }}>{group_code} - {group.name}</h2>
+            {Object.entries(group.subs).map(([sub_code, sub], idx) => (
+              <table
+                border={1}
+                cellPadding={5}
+                style={{ width: '100%', marginBottom: 12, background: idx % 2 === 0 ? "#fff" : "#f8f8f8" }}
+                key={sub_code}
+              >
+                <thead>
+                  <tr>
+                    <th>STT</th>
+                    <th>Tên công việc</th>
+                    <th>Lý trình</th>
+                    <th>Đơn vị</th>
+                    <th>Thiết kế</th>
+                    <th>% Hoàn thành tuần</th>
+                    <th>% Hoàn thành dự án</th>
+                    <th>Ghi chú</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      ))}
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>1</td>
+                    <td>{sub.name}</td>
+                    <td>{sub.rows.map(x => x.ly_trinh).filter(Boolean).join('; ')}</td>
+                    <td>{sub.rows.map(x => x.unit).filter(Boolean).join('; ')}</td>
+                    <td>{sumField(sub.rows, 'thiet_ke')}</td>
+                    <td>{sumField(sub.rows, 'percent_week')}</td>
+                    <td>{sumField(sub.rows, 'percent_duan')}</td>
+                    <td>{sub.rows.map(x => x.note).filter(Boolean).join('; ')}</td>
+                  </tr>
+                </tbody>
+              </table>
+            ))}
+          </div>
+        ))
+      )}
 
-      <div style={{background: "#ecfff1", padding: 20, borderRadius: 12, marginTop: 30}}>
-        <h2 style={{fontWeight: 700, fontSize: 22}}>Đánh giá AI tổng hợp tự động:</h2>
-        <pre style={{margin: 0, fontSize: 17}}>
-          {aiEval.length > 0 ? aiEval.join('\n\n') : "Không có dữ liệu."}
-        </pre>
+      {/* Đánh giá AI tổng hợp phía dưới */}
+      <div style={{ background: '#eaffea', marginTop: 20, padding: 24 }}>
+        <b>Đánh giá AI tự động</b>
+        <div>
+          <div>Đánh giá tổng hợp tự động:</div>
+          {Object.entries(groupData).map(([group_code, group]) => (
+            <div key={group_code} style={{ marginBottom: 10 }}>
+              <b>- {group_code} - {group.name}:</b>
+              <ul>
+                {Object.entries(group.subs).map(([sub_code, sub]) => (
+                  <li key={sub_code}>
+                    {sub.name}: tuần {sumField(sub.rows, 'percent_week')}%, lũy kế dự án {sumField(sub.rows, 'percent_duan')}%
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
