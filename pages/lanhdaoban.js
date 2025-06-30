@@ -4,7 +4,7 @@ import Head from "next/head";
 import axios from "axios";
 
 
-// Hàm chuẩn hóa tên công việc (bỏ dấu, ký tự đặc biệt, số liệu, về thường, bỏ cách thừa, bỏ từ dừng)
+// Chuẩn hóa mạnh mẽ tên công việc (loại bỏ dấu, stopword, số, ký tự đặc biệt)
 function normalizeString(str) {
   if (!str) return "";
   const stopWords = [
@@ -14,9 +14,9 @@ function normalizeString(str) {
   ];
   let s = str.toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // remove accents
-    .replace(/[^a-z0-9 ]/g, " ") // only keep alphanum
-    .replace(/\d+/g, " ") // remove numbers
+    .replace(/[\u0300-\u036f]/g, "") // bỏ dấu
+    .replace(/[^a-z0-9 ]/g, " ")    // chỉ giữ ký tự thường
+    .replace(/\d+/g, " ")           // bỏ số
     .replace(/\s+/g, " ")
     .trim();
   stopWords.forEach(sw => {
@@ -25,7 +25,7 @@ function normalizeString(str) {
   return s.replace(/\s+/g, " ").trim();
 }
 
-// Tính similarity đơn giản giữa 2 chuỗi (Levenshtein distance ngắn gọn)
+// Tính similarity đơn giản (Levenshtein distance)
 function similarity(a, b) {
   if (!a || !b) return 0;
   if (a === b) return 1;
@@ -81,20 +81,6 @@ function findProjectTask(subName, projectTasks) {
   return null;
 }
 
-
-// So khớp gần giống tên công việc giữa báo cáo tuần và hợp đồng
-function findProjectTask(subName, projectTasks) {
-  const n1 = normalizeString(subName);
-  if (!n1) return null;
-  return (
-    projectTasks.find(
-      (pt) =>
-        n1 === normalizeString(pt.task_name) ||
-        normalizeString(pt.task_name).includes(n1) ||
-        n1.includes(normalizeString(pt.task_name))
-    ) || null
-  );
-}
 
 export default function LanhDaoBan() {
   const [weeklyReports, setWeeklyReports] = useState([]);
