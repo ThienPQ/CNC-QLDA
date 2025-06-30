@@ -3,27 +3,42 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
+// Bộ ánh xạ từ/cụm đồng nghĩa, tiêu chuẩn ngành (có thể bổ sung thêm)
+const jobAliasDict = [
+  { match: /độ chặt yêu cầu k[=\- ]?0[.,]?98/gi, standard: "K98" },
+  { match: /k=0[.,]?98/gi, standard: "K98" },
+  { match: /k98/gi, standard: "K98" },
+  { match: /đắp đất nền đường/gi, standard: "đắp nền" },
+  { match: /đắp đất/gi, standard: "đắp nền" },
+  { match: /nền đường/gi, standard: "nền" },
+  { match: /bê tông nhựa mặt đường/gi, standard: "BTN mặt đường" },
+  // ... bổ sung thêm tùy ngành của bạn
+];
 
-// Chuẩn hóa mạnh mẽ tên công việc (loại bỏ dấu, stopword, số, ký tự đặc biệt)
 function normalizeString(str) {
   if (!str) return "";
+  let s = str.toLowerCase();
+  jobAliasDict.forEach(({ match, standard }) => {
+    s = s.replace(match, standard);
+  });
   const stopWords = [
     "thi cong", "hang muc", "cong viec", "duong", "cau", "nut giao", "tuyen",
     "bao cao", "hop dong", "cong trinh", "khoi luong", "bo sung", "nhua mat",
     "dat", "lop", "xay dung", "thiet ke"
   ];
-  let s = str.toLowerCase()
+  s = s
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // bỏ dấu
-    .replace(/[^a-z0-9 ]/g, " ")    // chỉ giữ ký tự thường
-    .replace(/\d+/g, " ")           // bỏ số
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\d+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  stopWords.forEach(sw => {
+  stopWords.forEach((sw) => {
     s = s.replace(new RegExp(`\\b${sw}\\b`, "g"), "");
   });
   return s.replace(/\s+/g, " ").trim();
 }
+
 
 // Tính similarity đơn giản (Levenshtein distance)
 function similarity(a, b) {
