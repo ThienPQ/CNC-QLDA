@@ -89,6 +89,9 @@ function findProjectTask(subName, projectTasks) {
     if (score > bestScore) {
       bestScore = score;
       best = pt;
+      // ĐÂY LÀ NƠI ĐẶT NGƯỠNG
+    if (best && bestScore > 0.2) return best;  // Để 0.2 tức là 20%
+    return null;
     }
   }
   // Nếu khớp trên 0.8 thì coi như hợp lệ
