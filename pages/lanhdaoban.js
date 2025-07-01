@@ -171,50 +171,56 @@ export default function LanhDaoBan() {
   }
 
   // Đánh giá AI tổng hợp tự động: chỉ hiện các công việc có ghi chú
-  function renderAIAssessment() {
-    if (!weeklyReports.length) return <div>Không có dữ liệu.</div>;
+  // Đánh giá AI tổng hợp tự động: chỉ hiện các công việc có ghi chú KHÁC rỗng và KHÁC "nan"
+function renderAIAssessment() {
+  if (!weeklyReports.length) return <div>Không có dữ liệu.</div>;
 
-    // Gom nhóm và tạo đánh giá cho từng nhóm cha
-    const result = Object.entries(grouped).map(([group_code, data], idx) => {
-      // Đánh giá từng công việc con có ghi chú
-      const rows = data.details
-        .filter(row => row.note && row.note.trim() !== "")
-        .map((row) => {
-          const matched = findProjectTask(row.sub_name, projectTasks);
-          let contractDesign = matched ? matched.design_quantity : "";
-          let percentHD = "";
-          let status = "";
-          if (matched && matched.design_quantity && row.thiet_ke) {
-            // Tính phần trăm hoàn thành so với hợp đồng
-            let actual = parseFloat(row.thiet_ke);
-            let planned = parseFloat(matched.design_quantity);
-            if (planned > 0) percentHD = ((actual / planned) * 100).toFixed(1);
-            status = percentHD
-              ? `${percentHD}% so với hợp đồng`
-              : "Không xác định";
-          } else {
-            status = "Không có trong hợp đồng";
-          }
-          return (
-            <div key={row.sub_code || row.sub_name}>
-              + {row.sub_name}: {row.thiet_ke || 0} ({status})<br />
-              <i style={{ color: "#1a3b6b" }}>Ghi chú: {row.note}</i>
-            </div>
-          );
-        });
-
-      if (rows.length === 0) return null;
-      return (
-        <div key={group_code} style={{ marginBottom: 8 }}>
-          <div>
-            <b>
-              - {group_code} {data.group_name}:
-            </b>
+  // Gom nhóm và tạo đánh giá cho từng nhóm cha
+  const result = Object.entries(grouped).map(([group_code, data], idx) => {
+    // Chỉ hiện công việc có ghi chú KHÁC rỗng và KHÁC "nan"
+    const rows = data.details
+      .filter(row =>
+        row.note &&
+        row.note.trim() !== "" &&
+        row.note.trim().toLowerCase() !== "nan"
+      )
+      .map((row) => {
+        const matched = findProjectTask(row.sub_name, projectTasks);
+        let contractDesign = matched ? matched.design_quantity : "";
+        let percentHD = "";
+        let status = "";
+        if (matched && matched.design_quantity && row.thiet_ke) {
+          // Tính phần trăm hoàn thành so với hợp đồng
+          let actual = parseFloat(row.thiet_ke);
+          let planned = parseFloat(matched.design_quantity);
+          if (planned > 0) percentHD = ((actual / planned) * 100).toFixed(1);
+          status = percentHD
+            ? `${percentHD}% so với hợp đồng`
+            : "Không xác định";
+        } else {
+          status = "Không có trong hợp đồng";
+        }
+        return (
+          <div key={row.sub_code || row.sub_name}>
+            + {row.sub_name}: {row.thiet_ke || 0} ({status})<br />
+            <i style={{ color: "#1a3b6b" }}>Ghi chú: {row.note}</i>
           </div>
-          {rows}
+        );
+      });
+
+    if (rows.length === 0) return null;
+    return (
+      <div key={group_code} style={{ marginBottom: 8 }}>
+        <div>
+          <b>
+            - {group_code} {data.group_name}:
+          </b>
         </div>
-      );
-    });
+        {rows}
+      </div>
+    );
+  });
+
 
     // Chỉ hiện nếu có ít nhất một đánh giá có ghi chú
     if (result.filter(x => x).length === 0)
