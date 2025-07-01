@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Bộ ánh xạ đồng nghĩa, bạn bổ sung thêm tùy ngành
+// Bộ từ điển chuẩn hóa đồng nghĩa
 const jobAliasDict = [
   { match: /độ chặt yêu cầu k[=\- ]?0[.,]?98/gi, standard: "K98" },
   { match: /k=0[.,]?98/gi, standard: "K98" },
@@ -11,8 +11,10 @@ const jobAliasDict = [
   { match: /đắp đất nền đường/gi, standard: "đắp nền" },
   { match: /đắp đất/gi, standard: "đắp nền" },
   { match: /nền đường/gi, standard: "nền" },
-  { match: /bê tông nhựa mặt đường/gi, standard: "BTN mặt đường" },
-  // ... bổ sung thêm
+  { match: /bê tông nhựa mặt đường/gi, standard: "btn mặt đường" },
+  { match: /thi công lớp/gi, standard: "" },
+  { match: /thi công/gi, standard: "" },
+  // ... bổ sung thêm nếu muốn
 ];
 
 function normalizeString(str) {
@@ -21,6 +23,7 @@ function normalizeString(str) {
   jobAliasDict.forEach(({ match, standard }) => {
     s = s.replace(match, standard);
   });
+  // Loại stopword và ký tự đặc biệt
   const stopWords = [
     "thi cong", "hang muc", "cong viec", "duong", "cau", "nut giao", "tuyen",
     "bao cao", "hop dong", "cong trinh", "khoi luong", "bo sung", "nhua mat",
@@ -39,11 +42,9 @@ function normalizeString(str) {
   return s.replace(/\s+/g, " ").trim();
 }
 
-// Đo độ tương tự 2 chuỗi
 function similarity(a, b) {
   if (!a || !b) return 0;
   if (a === b) return 1.0;
-  // Levenshtein
   const matrix = [];
   let i;
   for (i = 0; i <= b.length; i++) { matrix[i] = [i]; }
@@ -55,9 +56,9 @@ function similarity(a, b) {
         matrix[i][j] = matrix[i - 1][j - 1];
       } else {
         matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1, // thay
-          matrix[i][j - 1] + 1,     // chèn
-          matrix[i - 1][j] + 1      // xóa
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
         );
       }
     }
@@ -69,13 +70,13 @@ function similarity(a, b) {
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
   if (!n1) return null;
-  // 1. Exact or contains match
+  // Exact or contains
   let found = projectTasks.find(pt => {
     const n2 = normalizeString(pt.task_name);
     return n1 === n2 || n2.includes(n1) || n1.includes(n2);
   });
   if (found) return found;
-  // 2. Similarity matching
+  // Similarity matching
   let best = null;
   let bestScore = 0.0;
   for (let pt of projectTasks) {
@@ -86,16 +87,13 @@ function findProjectTask(subName, projectTasks) {
       best = pt;
     }
   }
-  // NGƯỠNG similarity (chỉnh thấp nếu muốn bắt lỏng hơn, cao nếu muốn khớp mạnh)
-  if (best && bestScore > 0.7) return best;
+  if (best && bestScore > 0.7) return best; // 0.7 là ngưỡng, chỉnh nếu cần
   return null;
 }
 
-// So sánh và tạo đánh giá tổng hợp giữa 2 tuần mới nhất
 function generateAIReportSummary(latest, prev, projectTasks) {
-  if (!latest) return "Không có dữ liệu tuần mới nhất.";
+  if (!latest || latest.length === 0) return "Không có dữ liệu tuần mới nhất.";
   let summary = [];
-  // Group các công việc theo tuyến/hạng mục cha
   const groupMap = {};
   latest.forEach(task => {
     const groupKey = `${task.group_code} - ${task.group_name}`;
@@ -116,7 +114,6 @@ function generateAIReportSummary(latest, prev, projectTasks) {
             ? `Giảm ${Math.abs(diff).toFixed(2)}% so với tuần trước`
             : "Không thay đổi so với tuần trước";
       }
-      // So với hợp đồng
       const projTask = findProjectTask(task.sub_name, projectTasks);
       const percentHD = projTask?.percent || task.percent_duan || "";
       summary.push(
@@ -133,7 +130,6 @@ export default function LanhDaoBan() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    // Lấy dữ liệu từ API
     async function fetchData() {
       try {
         const [res1, res2] = await Promise.all([
@@ -150,7 +146,7 @@ export default function LanhDaoBan() {
     fetchData();
   }, []);
 
-  // Lấy tất cả tuần có trong dữ liệu (có thể cho chọn tuần)
+  // Nhóm các tuần
   const weekGroups = {};
   weeklyReports.forEach(r => {
     const key = r.to_date;
@@ -169,7 +165,6 @@ export default function LanhDaoBan() {
       if (!result[r.group_code]) result[r.group_code] = { group_name: r.group_name, tasks: {} };
       if (!result[r.group_code].tasks[r.sub_code]) result[r.group_code].tasks[r.sub_code] = { ...r };
       else {
-        // Nếu đã có thì cộng dồn (tuỳ loại số liệu, ví dụ cộng thể tích, lấy % max, v.v.)
         result[r.group_code].tasks[r.sub_code] = {
           ...r,
           percent_week: (parseFloat(result[r.group_code].tasks[r.sub_code].percent_week || 0) + parseFloat(r.percent_week || 0)).toString(),
@@ -189,11 +184,8 @@ export default function LanhDaoBan() {
       <Head>
         <title>Báo cáo tuần và đánh giá</title>
       </Head>
-
       <h1 className="text-2xl font-bold mb-4">Báo cáo tuần và đánh giá</h1>
-
       {error && <p className="text-red-500">{error}</p>}
-
       {Object.keys(grouped).length === 0 ? (
         <p>Không có dữ liệu báo cáo.</p>
       ) : (
@@ -239,7 +231,6 @@ export default function LanhDaoBan() {
           </div>
         ))
       )}
-
       <div className="mt-4 p-4 bg-gray-50 border rounded text-base whitespace-pre-line">
         <b>Đánh giá AI tự động:</b>
         <br />
