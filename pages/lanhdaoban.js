@@ -80,6 +80,7 @@ function findProjectTask(subName, projectTasks) {
     return n1 === n2 || n2.includes(n1) || n1.includes(n2);
   });
   if (found) return found;
+
   // 2. Similarity matching
   let best = null;
   let bestScore = 0.0;
@@ -91,17 +92,10 @@ function findProjectTask(subName, projectTasks) {
       best = pt;
     }
   }
-  // NGƯỠNG 0.2 (20%) đặt ở đây
+  // NGƯỠNG SIMILARITY ở đây (ví dụ 0.2 là 20%)
   if (best && bestScore > 0.2) return best;
   return null;
 }
-
-  // Nếu khớp trên 0.8 thì coi như hợp lệ
-  if (best && bestScore > 0.8) return best;
-  return null;
-}
-
-
 export default function LanhDaoBan() {
   const [weeklyReports, setWeeklyReports] = useState([]);
   const [projectTasks, setProjectTasks] = useState([]);
