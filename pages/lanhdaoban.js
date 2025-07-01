@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Bộ ánh xạ đồng nghĩa, chuẩn hóa mạnh
+// Bộ ánh xạ cụm đồng nghĩa, tiêu chuẩn ngành
 const jobAliasDict = [
   { match: /độ chặt yêu cầu k[=\- ]?0[.,]?98/gi, standard: "K98" },
   { match: /k=0[.,]?98/gi, standard: "K98" },
@@ -12,7 +12,7 @@ const jobAliasDict = [
   { match: /đắp đất/gi, standard: "đắp nền" },
   { match: /nền đường/gi, standard: "nền" },
   { match: /bê tông nhựa mặt đường/gi, standard: "BTN mặt đường" },
-  // ... có thể bổ sung thêm nữa
+  // ... bổ sung thêm nếu cần
 ];
 
 function normalizeString(str) {
@@ -69,7 +69,7 @@ function similarity(a, b) {
   return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
 }
 
-// Tìm công việc hợp đồng gần giống nhất
+// Tìm công việc hợp đồng gần giống nhất (chuẩn hóa mạnh)
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
   if (!n1) return null;
@@ -79,8 +79,7 @@ function findProjectTask(subName, projectTasks) {
     return n1 === n2 || n2.includes(n1) || n1.includes(n2);
   });
   if (found) return found;
-
-  // 2. Similarity matching
+  // 2. Similarity matching (ngưỡng > 0.2 ~ 20%)
   let best = null;
   let bestScore = 0.0;
   for (let pt of projectTasks) {
@@ -91,7 +90,6 @@ function findProjectTask(subName, projectTasks) {
       best = pt;
     }
   }
-  // NGƯỠNG SIMILARITY ở đây (ví dụ 0.2 là 20%)
   if (best && bestScore > 0.2) return best;
   return null;
 }
@@ -99,34 +97,73 @@ function findProjectTask(subName, projectTasks) {
 export default function LanhDaoBan() {
   const [weeklyReports, setWeeklyReports] = useState([]);
   const [projectTasks, setProjectTasks] = useState([]);
-  const [fromDate, setFromDate] = useState("2025-06-16");
-  const [toDate, setToDate] = useState("2025-06-22");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [allWeeks, setAllWeeks] = useState([]);
   const [error, setError] = useState("");
 
+  // Lấy tất cả báo cáo tuần, tìm tuần mới nhất
   useEffect(() => {
-    async function fetchWeeklyReports() {
+    async function fetchWeeklyReportsInit() {
       try {
-        const res = await axios.get("/api/get-weekly-reports", {
-          params: { fromDate, toDate },
+        const res = await axios.get("/api/get-weekly-reports");
+        const data = res.data || [];
+        if (data.length === 0) {
+          setWeeklyReports([]);
+          setAllWeeks([]);
+          setError("Không có dữ liệu báo cáo.");
+          return;
+        }
+        // Gom các tuần (theo from_date, to_date)
+        const weekSet = new Set(data.map(r => r.from_date + "_" + r.to_date));
+        const weekList = Array.from(weekSet).map(w => {
+          const [f, t] = w.split("_");
+          return { from_date: f, to_date: t };
         });
-        setWeeklyReports(res.data || []);
+        weekList.sort((a, b) => b.to_date.localeCompare(a.to_date));
+        setAllWeeks(weekList);
+        setFromDate(weekList[0].from_date);
+        setToDate(weekList[0].to_date);
+        // Lọc tuần mới nhất
+        const filtered = data.filter(r => r.from_date === weekList[0].from_date && r.to_date === weekList[0].to_date);
+        setWeeklyReports(filtered);
         setError("");
-      } catch (err) {
-        setError("Không thể tải dữ liệu báo cáo");
+      } catch {
         setWeeklyReports([]);
+        setAllWeeks([]);
+        setError("Không thể tải dữ liệu báo cáo.");
       }
     }
+    fetchWeeklyReportsInit();
+  }, []);
+
+  // Khi đổi tuần, lấy dữ liệu đúng tuần
+  useEffect(() => {
+    async function fetchWeeklyReports() {
+      if (!fromDate || !toDate) return;
+      try {
+        const res = await axios.get("/api/get-weekly-reports", { params: { fromDate, toDate } });
+        setWeeklyReports(res.data || []);
+        setError("");
+      } catch {
+        setWeeklyReports([]);
+        setError("Không thể tải dữ liệu báo cáo.");
+      }
+    }
+    if (fromDate && toDate) fetchWeeklyReports();
+  }, [fromDate, toDate]);
+
+  useEffect(() => {
     async function fetchProjectTasks() {
       try {
         const res = await axios.get("/api/get-project-tasks");
         setProjectTasks(res.data || []);
-      } catch (err) {
+      } catch {
         setProjectTasks([]);
       }
     }
-    fetchWeeklyReports();
     fetchProjectTasks();
-  }, [fromDate, toDate]);
+  }, []);
 
   // Gom nhóm theo hạng mục cha (group_code/group_name)
   const grouped = {};
@@ -140,45 +177,7 @@ export default function LanhDaoBan() {
     grouped[row.group_code].details.push(row);
   }
 
-  // Hàm tìm báo cáo tuần trước (theo ngày kết thúc tuần)
-  function getPrevWeekData(allReports, currFromDate, currToDate) {
-    let weekDates = [...new Set(allReports.map(r => r.to_date || r.toDate))].sort();
-    let idx = weekDates.indexOf(currToDate);
-    if (idx > 0) {
-      return allReports.filter(r => (r.to_date || r.toDate) === weekDates[idx - 1]);
-    }
-    return [];
-  }
-
-  // So sánh số liệu tuần này và tuần trước
-  function renderWeekComparison() {
-    const prevWeekReports = getPrevWeekData(weeklyReports, fromDate, toDate);
-    if (!weeklyReports.length || !prevWeekReports.length) return null;
-
-    let changed = [];
-    weeklyReports.forEach(row => {
-      let prev = prevWeekReports.find(
-        r => normalizeString(r.sub_name) === normalizeString(row.sub_name)
-      );
-      if (prev) {
-        let delta = (parseFloat(row.thiet_ke || 0) - parseFloat(prev.thiet_ke || 0));
-        if (Math.abs(delta) > 0.01)
-          changed.push(
-            `+ ${row.sub_name}: ${delta > 0 ? "tăng" : "giảm"} ${Math.abs(delta)} ${row.unit || ""} so với tuần trước`
-          );
-      }
-    });
-    return (
-      <div style={{margin:"12px 0 0 0", color:"#088"}}>
-        <b>So sánh tuần này với tuần trước:</b>
-        <pre style={{whiteSpace:"pre-wrap"}}>
-          {changed.length ? changed.join("\n") : "Không có thay đổi đáng kể."}
-        </pre>
-      </div>
-    );
-  }
-
-  // Tính toán AI đánh giá so sánh với hợp đồng
+  // Tính toán AI đánh giá tổng hợp
   function renderAIAssessment() {
     if (!weeklyReports.length) return <div>Không có dữ liệu.</div>;
     const result = Object.entries(grouped).map(([group_code, data], idx) => {
@@ -203,7 +202,6 @@ export default function LanhDaoBan() {
           </div>
         );
       });
-
       return (
         <div key={group_code} style={{ marginBottom: 8 }}>
           <div>
@@ -215,7 +213,6 @@ export default function LanhDaoBan() {
         </div>
       );
     });
-
     return <div>Đánh giá tổng hợp tự động: {result}</div>;
   }
 
@@ -225,20 +222,22 @@ export default function LanhDaoBan() {
         <title>Báo cáo tuần và đánh giá</title>
       </Head>
       <h1 style={{ fontWeight: 800, fontSize: 40 }}>Báo cáo tuần và đánh giá</h1>
-
       <div style={{ marginBottom: 12 }}>
-        <span>Từ ngày: </span>
-        <input
-          type="date"
-          value={fromDate}
-          onChange={(e) => setFromDate(e.target.value)}
-        />
-        <span style={{ marginLeft: 16 }}>Đến ngày: </span>
-        <input
-          type="date"
-          value={toDate}
-          onChange={(e) => setToDate(e.target.value)}
-        />
+        <span>Chọn tuần: </span>
+        <select
+          value={fromDate + "_" + toDate}
+          onChange={e => {
+            const [f, t] = e.target.value.split("_");
+            setFromDate(f);
+            setToDate(t);
+          }}
+        >
+          {allWeeks.map((w, i) => (
+            <option key={i} value={w.from_date + "_" + w.to_date}>
+              {w.from_date} đến {w.to_date}
+            </option>
+          ))}
+        </select>
       </div>
 
       {error && (
@@ -249,13 +248,11 @@ export default function LanhDaoBan() {
         <div>Không có dữ liệu báo cáo.</div>
       )}
 
-      {/* Hiển thị từng hạng mục cha */}
       {Object.entries(grouped).map(([group_code, data]) => (
         <div key={group_code} style={{ marginBottom: 28 }}>
           <h2 style={{ fontWeight: 700, fontSize: 30 }}>
             {group_code} - {data.group_name}
           </h2>
-          {/* Với mỗi nhóm con */}
           {data.details.length > 0 && (
             <table
               border={2}
@@ -334,7 +331,6 @@ export default function LanhDaoBan() {
         <b style={{ fontSize: 22 }}>Đánh giá AI tổng hợp tự động:</b>
         <div style={{ marginTop: 6, fontFamily: "monospace" }}>
           {renderAIAssessment()}
-          {renderWeekComparison()}
         </div>
       </div>
     </div>

@@ -1,0 +1,71 @@
+group_code,group_name,sub_code,sub_name,ly_trinh,unit,thiet_ke,percent_week,note,from_date,to_date
+I.1,Tuyến nội khu,,Vét hữu cơ,nan,m3,1636.57,,nan,2025-06-23,2025-06-29
+I.1,Tuyến nội khu,,"Đào cấp, đào nền, khuôn đường",Km0+100- Km0+900,m3,29504.069999999992,,nan,2025-06-23,2025-06-29
+I.1,Tuyến nội khu,,Đắp nền K90,Km0+900 - Km1+15.76,m3,11361.14,,nan,2025-06-23,2025-06-29
+I.1,Tuyến nội khu,,Đắp nền K95,Km0+900 - Km1+15.76,m3,4962.179999999999,,nan,2025-06-23,2025-06-29
+I.2,Tuyến số 2,,Vét hữu cơ,Km0+160.38- Km0+400,m3,6574.119999999998,,nan,2025-06-23,2025-06-29
+I.2,Tuyến số 2,,"Đào cấp, đào nền, khuôn đường",Km0+160.38- Km0+400,m3,3713.6300000000006,,nan,2025-06-23,2025-06-29
+I.2,Tuyến số 2,,Đắp nền K90,Km0+160.38- Km0+400,m3,36233.86000000001,,nan,2025-06-23,2025-06-29
+I.2,Tuyến số 2,,Đắp nền K95,Km0+160.38- Km0+400,m3,18387.740000000005,,nan,2025-06-23,2025-06-29
+I.2a,Nút giao tuyến số 2,,Vét hữu cơ,Km0+7.21- Km0+27.5,m3,2529.3060000000005,,nan,2025-06-23,2025-06-29
+I.2a,Nút giao tuyến số 2,,"Đào cấp, đào nền, khuôn đường",Km0+7.21- Km0+27.5,m3,1242.0700664999986,,nan,2025-06-23,2025-06-29
+I.2a,Nút giao tuyến số 2,,Đắp nền K90,Km0+7.21- Km0+27.5,m3,8668.1274428,,nan,2025-06-23,2025-06-29
+I.2a,Nút giao tuyến số 2,,Đắp nền K95,Km0+7.21- Km0+27.5,m3,5497.91,,nan,2025-06-23,2025-06-29
+I.3,Tuyến chính CT,,Vét hữu cơ,nan,m3,1123.98,,nan,2025-06-23,2025-06-29
+I.3,Tuyến chính CT,,"Đào nền, khuôn đường",nan,m3,2751.25,,nan,2025-06-23,2025-06-29
+I.3,Tuyến chính CT,,Đắp nền K90,nan,m3,1971.2299999999998,,nan,2025-06-23,2025-06-29
+I.3,Tuyến chính CT,,Đắp nền K95,nan,m3,0,,nan,2025-06-23,2025-06-29
+I.3,Tuyến chính CT,,Đắp nền K98,nan,m3,1058.53,,nan,2025-06-23,2025-06-29
+I.3,Tuyến chính CT,,Subase,nan,m3,529.235,,nan,2025-06-23,2025-06-29
+I.4,Tuyến nhánh CT,,Vét hữu cơ,nan,m3,62.82,,nan,2025-06-23,2025-06-29
+I.4,Tuyến nhánh CT,,"Đào nền, khuôn đường",nan,m3,570.6899999999999,,nan,2025-06-23,2025-06-29
+I.4,Tuyến nhánh CT,,Đắp nền K90,nan,m3,198.41,,nan,2025-06-23,2025-06-29
+I.4,Tuyến nhánh CT,,Đắp nền K95,nan,m3,13.270000000000001,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,D600,nan,nan,nan,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Thi công đào móng ga cống,Từ G7 đến G14,m3,1374.5827801137764,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Thi công lớp cát đệm đầm chặt K95,Từ G7 đến G14,m3,44.714000000000006,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Thi công lớp đá dăm 2x4 đệm,Từ G7 đến G14,m3,67.071,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Lắp đặt cống D600,Từ G7 đến G14,m,566,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Thi công lớp đá dăm 2x4 đệm móng hố ga,Từ G7 đến G14,m3,19.968000000000004,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Thi công bê tông lót M100 móng hố ga,Từ G7 đến G14,m3,14.976000000000003,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Lắp đặt hố ga D600,Từ G7 đến G14,cái,39,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,D800,nan,nan,nan,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Thi công đào móng ga cống,nan,m3,1715.879529505439,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Thi công lớp cát đệm đầm chặt K95,0,m3,53.24000000000001,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Thi công lớp đá dăm 2x4 đệm,0,m3,79.86,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Lắp đặt cống D800,0,m,484,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Thi công lớp đá dăm 2x4 đệm móng hố ga,0,m3,9.216000000000001,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Thi công bê tông lót M100 móng hố ga,0,m3,6.912000000000001,,nan,2025-06-23,2025-06-29
+II.1,Tuyến Cải tạo,,Lắp đặt hố ga D800,0,cái,16,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,D600,nan,nan,nan,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công đào móng ga cống,Từ G23 đến G29,m3,3093.8068323320217,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công lớp cát đệm đầm chặt K95,Từ G23 đến G29,m3,96.38000000000002,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công lớp đá dăm 2x4 đệm móng cống,Từ G23 đến G29,m3,144.57,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Lắp đặt cống,Từ G23 đến G29,m,1220,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công lớp đá dăm 2x4 đệm móng hố ga,Từ G23 đến G29,m3,24.064000000000004,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công bê tông lót M100 móng hố ga,Từ G23 đến G29,m3,18.048000000000002,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Lắp đặt hố ga,Từ G23 đến G29,cái,47,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,D800,nan,nan,nan,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công đào móng ga cống,nan,m3,1364.4061568941281,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công lớp cát đệm đầm chặt K95,0,m3,25.190000000000005,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công lớp đá dăm 2x4 đệm,0,m3,37.785000000000004,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Lắp đặt cống D800,0,m,229,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công lớp đá dăm 2x4 đệm móng hố ga,0,m3,27.64800000000001,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công bê tông lót M100 móng hố ga,0,m3,20.736000000000008,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Lắp đặt hố ga D800,0,cái,48,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,D1000,nan,nan,nan,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công đào móng ga cống,nan,m3,1874.0001803515618,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công lớp cát đệm đầm chặt K95,0,m3,51.483000000000004,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công lớp đá dăm 2x4 đệm,0,m3,77.2245,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Lắp đặt cống D1000,0,m,393,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công lớp đá dăm 2x4 đệm móng hố ga,0,m3,3.7800000000000007,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công bê tông lót M100 móng hố ga,0,m3,2.8350000000000004,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Lắp đặt hố ga D1000,0,cái,5,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,D1250,nan,nan,nan,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công đào móng ga cống,nan,m3,1153.0132431674995,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công lớp cát đệm đầm chặt K95,0,m3,31.5436,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công lớp đá dăm 2x4 đệm,0,m3,47.3154,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Lắp đặt cống D1250,0,m,214,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công lớp đá dăm 2x4 đệm móng hố ga,0,m3,nan,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Thi công bê tông lót M100 móng hố ga,0,m3,nan,,nan,2025-06-23,2025-06-29
+II.3,Tuyến Nội khu,,Lắp đặt hố ga D1250,0,cái,nan,,nan,2025-06-23,2025-06-29
