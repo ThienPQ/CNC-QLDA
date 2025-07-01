@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Bộ từ điển chuẩn hóa đồng nghĩa
+// Bộ ánh xạ đồng nghĩa, chuẩn hóa mạnh
 const jobAliasDict = [
   { match: /độ chặt yêu cầu k[=\- ]?0[.,]?98/gi, standard: "K98" },
   { match: /k=0[.,]?98/gi, standard: "K98" },
@@ -11,10 +11,8 @@ const jobAliasDict = [
   { match: /đắp đất nền đường/gi, standard: "đắp nền" },
   { match: /đắp đất/gi, standard: "đắp nền" },
   { match: /nền đường/gi, standard: "nền" },
-  { match: /bê tông nhựa mặt đường/gi, standard: "btn mặt đường" },
-  { match: /thi công lớp/gi, standard: "" },
-  { match: /thi công/gi, standard: "" },
-  // ... bổ sung thêm nếu muốn
+  { match: /bê tông nhựa mặt đường/gi, standard: "BTN mặt đường" },
+  // ... có thể bổ sung thêm nữa
 ];
 
 function normalizeString(str) {
@@ -23,7 +21,6 @@ function normalizeString(str) {
   jobAliasDict.forEach(({ match, standard }) => {
     s = s.replace(match, standard);
   });
-  // Loại stopword và ký tự đặc biệt
   const stopWords = [
     "thi cong", "hang muc", "cong viec", "duong", "cau", "nut giao", "tuyen",
     "bao cao", "hop dong", "cong trinh", "khoi luong", "bo sung", "nhua mat",
@@ -42,41 +39,48 @@ function normalizeString(str) {
   return s.replace(/\s+/g, " ").trim();
 }
 
+// Tính similarity đơn giản (Levenshtein distance)
 function similarity(a, b) {
   if (!a || !b) return 0;
-  if (a === b) return 1.0;
-  const matrix = [];
-  let i;
-  for (i = 0; i <= b.length; i++) { matrix[i] = [i]; }
-  let j;
-  for (j = 0; j <= a.length; j++) { matrix[0][j] = j; }
-  for (i = 1; i <= b.length; i++) {
-    for (j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
+  if (a === b) return 1;
+  let longer = a.length > b.length ? a : b;
+  let shorter = a.length > b.length ? b : a;
+  let longerLength = longer.length;
+  if (longerLength === 0) return 1.0;
+  let editDistance = (s1, s2) => {
+    let costs = [];
+    for (let i = 0; i <= s1.length; i++) {
+      let lastValue = i;
+      for (let j = 0; j <= s2.length; j++) {
+        if (i === 0) costs[j] = j;
+        else if (j > 0) {
+          let newValue = costs[j - 1];
+          if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
+            newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+          }
+          costs[j - 1] = lastValue;
+          lastValue = newValue;
+        }
       }
+      if (i > 0) costs[s2.length] = lastValue;
     }
-  }
-  return 1 - matrix[b.length][a.length] / Math.max(a.length, b.length);
+    return costs[s2.length];
+  };
+  return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
 }
 
 // Tìm công việc hợp đồng gần giống nhất
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
   if (!n1) return null;
-  // Exact or contains
+  // 1. Exact or contains match
   let found = projectTasks.find(pt => {
     const n2 = normalizeString(pt.task_name);
     return n1 === n2 || n2.includes(n1) || n1.includes(n2);
   });
   if (found) return found;
-  // Similarity matching
+
+  // 2. Similarity matching
   let best = null;
   let bestScore = 0.0;
   for (let pt of projectTasks) {
@@ -87,154 +91,251 @@ function findProjectTask(subName, projectTasks) {
       best = pt;
     }
   }
-  if (best && bestScore > 0.7) return best; // 0.7 là ngưỡng, chỉnh nếu cần
+  // NGƯỠNG SIMILARITY ở đây (ví dụ 0.2 là 20%)
+  if (best && bestScore > 0.2) return best;
   return null;
-}
-
-function generateAIReportSummary(latest, prev, projectTasks) {
-  if (!latest || latest.length === 0) return "Không có dữ liệu tuần mới nhất.";
-  let summary = [];
-  const groupMap = {};
-  latest.forEach(task => {
-    const groupKey = `${task.group_code} - ${task.group_name}`;
-    if (!groupMap[groupKey]) groupMap[groupKey] = [];
-    groupMap[groupKey].push(task);
-  });
-
-  for (const group in groupMap) {
-    summary.push(`**${group}**`);
-    groupMap[group].forEach(task => {
-      const prevTask = prev ? prev.find(t => t.sub_code === task.sub_code) : null;
-      let change = "";
-      if (prevTask) {
-        const diff = (parseFloat(task.percent_week) || 0) - (parseFloat(prevTask.percent_week) || 0);
-        change = diff > 0
-          ? `Tăng ${diff.toFixed(2)}% so với tuần trước`
-          : diff < 0
-            ? `Giảm ${Math.abs(diff).toFixed(2)}% so với tuần trước`
-            : "Không thay đổi so với tuần trước";
-      }
-      const projTask = findProjectTask(task.sub_name, projectTasks);
-      const percentHD = projTask?.percent || task.percent_duan || "";
-      summary.push(
-        `- ${task.sub_code} ${task.sub_name}: Tuần này hoàn thành ${task.percent_week}% (${change}). Tổng lũy kế: ${task.percent_duan || 0}% so với hợp đồng (${percentHD}%)${task.note ? `. Ghi chú: ${task.note}` : ""}`
-      );
-    });
-  }
-  return summary.join("\n");
 }
 
 export default function LanhDaoBan() {
   const [weeklyReports, setWeeklyReports] = useState([]);
   const [projectTasks, setProjectTasks] = useState([]);
-  const [error, setError] = useState(null);
+  const [fromDate, setFromDate] = useState("2025-06-16");
+  const [toDate, setToDate] = useState("2025-06-22");
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    async function fetchData() {
+    async function fetchWeeklyReports() {
       try {
-        const [res1, res2] = await Promise.all([
-          axios.get("/api/get-weekly-reports"),
-          axios.get("/api/get-project-tasks"),
-        ]);
-        setWeeklyReports(res1.data || []);
-        setProjectTasks(res2.data || []);
-        setError(null);
+        const res = await axios.get("/api/get-weekly-reports", {
+          params: { fromDate, toDate },
+        });
+        setWeeklyReports(res.data || []);
+        setError("");
       } catch (err) {
-        setError("Không thể tải dữ liệu báo cáo.");
+        setError("Không thể tải dữ liệu báo cáo");
+        setWeeklyReports([]);
       }
     }
-    fetchData();
-  }, []);
+    async function fetchProjectTasks() {
+      try {
+        const res = await axios.get("/api/get-project-tasks");
+        setProjectTasks(res.data || []);
+      } catch (err) {
+        setProjectTasks([]);
+      }
+    }
+    fetchWeeklyReports();
+    fetchProjectTasks();
+  }, [fromDate, toDate]);
 
-  // Nhóm các tuần
-  const weekGroups = {};
-  weeklyReports.forEach(r => {
-    const key = r.to_date;
-    if (!weekGroups[key]) weekGroups[key] = [];
-    weekGroups[key].push(r);
-  });
-  const weekDates = Object.keys(weekGroups).sort(); // tăng dần
-  const latestWeek = weekGroups[weekDates[weekDates.length-1]];
-  const prevWeek = weekGroups[weekDates[weekDates.length-2]];
+  // Gom nhóm theo hạng mục cha (group_code/group_name)
+  const grouped = {};
+  for (const row of weeklyReports) {
+    if (!grouped[row.group_code]) {
+      grouped[row.group_code] = {
+        group_name: row.group_name,
+        details: [],
+      };
+    }
+    grouped[row.group_code].details.push(row);
+  }
 
-  // Gộp cộng dồn số liệu theo công việc (sub_code), lấy giá trị mới nhất
-  function groupReports(reports) {
-    if (!reports) return {};
-    const result = {};
-    reports.forEach(r => {
-      if (!result[r.group_code]) result[r.group_code] = { group_name: r.group_name, tasks: {} };
-      if (!result[r.group_code].tasks[r.sub_code]) result[r.group_code].tasks[r.sub_code] = { ...r };
-      else {
-        result[r.group_code].tasks[r.sub_code] = {
-          ...r,
-          percent_week: (parseFloat(result[r.group_code].tasks[r.sub_code].percent_week || 0) + parseFloat(r.percent_week || 0)).toString(),
-          percent_duan: Math.max(parseFloat(result[r.group_code].tasks[r.sub_code].percent_duan || 0), parseFloat(r.percent_duan || 0)).toString(),
-        };
+  // Hàm tìm báo cáo tuần trước (theo ngày kết thúc tuần)
+  function getPrevWeekData(allReports, currFromDate, currToDate) {
+    let weekDates = [...new Set(allReports.map(r => r.to_date || r.toDate))].sort();
+    let idx = weekDates.indexOf(currToDate);
+    if (idx > 0) {
+      return allReports.filter(r => (r.to_date || r.toDate) === weekDates[idx - 1]);
+    }
+    return [];
+  }
+
+  // So sánh số liệu tuần này và tuần trước
+  function renderWeekComparison() {
+    const prevWeekReports = getPrevWeekData(weeklyReports, fromDate, toDate);
+    if (!weeklyReports.length || !prevWeekReports.length) return null;
+
+    let changed = [];
+    weeklyReports.forEach(row => {
+      let prev = prevWeekReports.find(
+        r => normalizeString(r.sub_name) === normalizeString(row.sub_name)
+      );
+      if (prev) {
+        let delta = (parseFloat(row.thiet_ke || 0) - parseFloat(prev.thiet_ke || 0));
+        if (Math.abs(delta) > 0.01)
+          changed.push(
+            `+ ${row.sub_name}: ${delta > 0 ? "tăng" : "giảm"} ${Math.abs(delta)} ${row.unit || ""} so với tuần trước`
+          );
       }
     });
-    return result;
+    return (
+      <div style={{margin:"12px 0 0 0", color:"#088"}}>
+        <b>So sánh tuần này với tuần trước:</b>
+        <pre style={{whiteSpace:"pre-wrap"}}>
+          {changed.length ? changed.join("\n") : "Không có thay đổi đáng kể."}
+        </pre>
+      </div>
+    );
   }
-  const grouped = groupReports(latestWeek);
 
-  // Đánh giá AI tự động giữa tuần mới nhất và trước đó
-  const aiSummary = generateAIReportSummary(latestWeek, prevWeek, projectTasks);
+  // Tính toán AI đánh giá so sánh với hợp đồng
+  function renderAIAssessment() {
+    if (!weeklyReports.length) return <div>Không có dữ liệu.</div>;
+    const result = Object.entries(grouped).map(([group_code, data], idx) => {
+      const rows = data.details.map((row) => {
+        const matched = findProjectTask(row.sub_name, projectTasks);
+        let contractDesign = matched ? matched.design_quantity : "";
+        let percentHD = "";
+        let status = "";
+        if (matched && matched.design_quantity && row.thiet_ke) {
+          let actual = parseFloat(row.thiet_ke);
+          let planned = parseFloat(matched.design_quantity);
+          if (planned > 0) percentHD = ((actual / planned) * 100).toFixed(1);
+          status = percentHD
+            ? `${percentHD}% so với hợp đồng`
+            : "Không xác định";
+        } else {
+          status = "Không có trong hợp đồng";
+        }
+        return (
+          <div key={row.sub_code || row.sub_name}>
+            + {row.sub_name}: {row.thiet_ke || 0} ({status})
+          </div>
+        );
+      });
+
+      return (
+        <div key={group_code} style={{ marginBottom: 8 }}>
+          <div>
+            <b>
+              - {group_code} {data.group_name}:
+            </b>
+          </div>
+          {rows}
+        </div>
+      );
+    });
+
+    return <div>Đánh giá tổng hợp tự động: {result}</div>;
+  }
 
   return (
     <div className="p-4">
       <Head>
         <title>Báo cáo tuần và đánh giá</title>
       </Head>
-      <h1 className="text-2xl font-bold mb-4">Báo cáo tuần và đánh giá</h1>
-      {error && <p className="text-red-500">{error}</p>}
-      {Object.keys(grouped).length === 0 ? (
-        <p>Không có dữ liệu báo cáo.</p>
-      ) : (
-        Object.entries(grouped).map(([groupCode, data], groupIndex) => (
-          <div key={groupIndex} className="mb-6">
-            <h2 className="text-lg font-semibold mb-2">
-              Hạng mục {groupCode}: {data.group_name}
-            </h2>
-            <table className="w-full border-collapse border border-gray-300 mb-2">
+      <h1 style={{ fontWeight: 800, fontSize: 40 }}>Báo cáo tuần và đánh giá</h1>
+
+      <div style={{ marginBottom: 12 }}>
+        <span>Từ ngày: </span>
+        <input
+          type="date"
+          value={fromDate}
+          onChange={(e) => setFromDate(e.target.value)}
+        />
+        <span style={{ marginLeft: 16 }}>Đến ngày: </span>
+        <input
+          type="date"
+          value={toDate}
+          onChange={(e) => setToDate(e.target.value)}
+        />
+      </div>
+
+      {error && (
+        <div style={{ color: "red", fontWeight: 600 }}>{error}</div>
+      )}
+
+      {!error && weeklyReports.length === 0 && (
+        <div>Không có dữ liệu báo cáo.</div>
+      )}
+
+      {/* Hiển thị từng hạng mục cha */}
+      {Object.entries(grouped).map(([group_code, data]) => (
+        <div key={group_code} style={{ marginBottom: 28 }}>
+          <h2 style={{ fontWeight: 700, fontSize: 30 }}>
+            {group_code} - {data.group_name}
+          </h2>
+          {/* Với mỗi nhóm con */}
+          {data.details.length > 0 && (
+            <table
+              border={2}
+              cellPadding={8}
+              style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}
+            >
               <thead>
-                <tr className="bg-gray-100">
-                  <th className="border border-gray-300 px-2 py-1">Nhóm CV</th>
-                  <th className="border border-gray-300 px-2 py-1">Tên công việc</th>
-                  <th className="border border-gray-300 px-2 py-1">Lý trình</th>
-                  <th className="border border-gray-300 px-2 py-1">Đơn vị</th>
-                  <th className="border border-gray-300 px-2 py-1">Thiết kế</th>
-                  <th className="border border-gray-300 px-2 py-1">% hoàn thành tuần</th>
-                  <th className="border border-gray-300 px-2 py-1">% hoàn thành dự án</th>
-                  <th className="border border-gray-300 px-2 py-1">% HĐ</th>
-                  <th className="border border-gray-300 px-2 py-1">Ghi chú</th>
+                <tr>
+                  <th>STT</th>
+                  <th>Tên công việc</th>
+                  <th>Lý trình</th>
+                  <th>Đơn vị</th>
+                  <th>Thiết kế (báo cáo tuần)</th>
+                  <th>Thiết kế (hợp đồng)</th>
+                  <th>% Hoàn thành so với HĐ</th>
+                  <th>Ghi chú</th>
+                  <th>So khớp hợp đồng</th>
                 </tr>
               </thead>
               <tbody>
-                {Object.values(data.tasks).map((task, i) => {
-                  const projTask = findProjectTask(task.sub_name, projectTasks);
-                  const percentHD = projTask?.percent || "";
+                {data.details.map((row, idx) => {
+                  const matched = findProjectTask(row.sub_name, projectTasks);
+                  const contractDesign = matched
+                    ? matched.design_quantity
+                    : "Không có trong hợp đồng";
+                  let percentHD = "";
+                  if (
+                    matched &&
+                    matched.design_quantity &&
+                    row.thiet_ke &&
+                    !isNaN(parseFloat(row.thiet_ke)) &&
+                    !isNaN(parseFloat(matched.design_quantity))
+                  ) {
+                    const actual = parseFloat(row.thiet_ke);
+                    const planned = parseFloat(matched.design_quantity);
+                    if (planned > 0)
+                      percentHD = ((actual / planned) * 100).toFixed(1) + "%";
+                  }
                   return (
-                    <tr key={i}>
-                      <td className="border border-gray-300 px-2 py-1">{task.sub_code}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.sub_name}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.ly_trinh}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.unit}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.thiet_ke}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.percent_week}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.percent_duan}</td>
-                      <td className="border border-gray-300 px-2 py-1">{percentHD}</td>
-                      <td className="border border-gray-300 px-2 py-1">{task.note}</td>
+                    <tr key={row.sub_code || row.sub_name}>
+                      <td>{idx + 1}</td>
+                      <td>{row.sub_name}</td>
+                      <td>{row.ly_trinh}</td>
+                      <td>{row.unit}</td>
+                      <td>{row.thiet_ke}</td>
+                      <td>{contractDesign}</td>
+                      <td>
+                        {percentHD ||
+                          (contractDesign === "Không có trong hợp đồng"
+                            ? ""
+                            : "Không xác định")}
+                      </td>
+                      <td>{row.note}</td>
+                      <td>
+                        {matched
+                          ? "Khớp công việc hợp đồng"
+                          : "Không khớp công việc hợp đồng"}
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-          </div>
-        ))
-      )}
-      <div className="mt-4 p-4 bg-gray-50 border rounded text-base whitespace-pre-line">
-        <b>Đánh giá AI tự động:</b>
-        <br />
-        {aiSummary}
+          )}
+        </div>
+      ))}
+
+      <div
+        style={{
+          marginTop: 24,
+          background: "#eaffea",
+          padding: 18,
+          borderRadius: 8,
+        }}
+      >
+        <b style={{ fontSize: 22 }}>Đánh giá AI tổng hợp tự động:</b>
+        <div style={{ marginTop: 6, fontFamily: "monospace" }}>
+          {renderAIAssessment()}
+          {renderWeekComparison()}
+        </div>
       </div>
     </div>
   );
