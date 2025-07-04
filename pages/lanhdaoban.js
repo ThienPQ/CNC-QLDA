@@ -18,13 +18,12 @@ function normalizeString(str) {
   return s;
 }
 
-// Hàm so khớp công việc hợp đồng chỉ dùng normalize, không điều kiện ngoài
+// So khớp công việc hợp đồng chỉ dùng normalize
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
   if (!n1) return null;
   let found = projectTasks.find(pt => {
     const n2 = normalizeString(pt.task_name);
-    // console.log(`So khớp "${n1}" với "${n2}"`);
     return n1 === n2;
   });
   if (found) return found;
@@ -77,26 +76,41 @@ function similarity(a, b) {
   return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
 }
 
-function getTaskProgress(weeklyReports, projectTasks) {
+// Tổng hợp tiến độ cho từng tuyến/hạng mục riêng biệt
+function getTaskProgressByGroup(weeklyReports, projectTasks) {
+  // result[group_code][task_name] = {...}
   const result = {};
   for (const row of weeklyReports) {
+    const group = row.group_name || row.group_code || "Nhóm khác";
     const matched = findProjectTask(row.sub_name, projectTasks);
     if (matched) {
-      const key = matched.task_name;
-      if (!result[key]) {
-        result[key] = {
+      const taskKey = matched.task_name;
+      if (!result[group]) result[group] = {};
+      if (!result[group][taskKey]) {
+        result[group][taskKey] = {
           task: matched,
           totalActual: 0,
           contractQty: parseFloat(matched.design_quantity || 0),
           listRows: [],
         };
       }
-      result[key].totalActual += parseFloat(row.thiet_ke || 0);
-      result[key].listRows.push(row);
+      const v = parseFloat(row.thiet_ke);
+      if (!isNaN(v) && v > 0) {
+        result[group][taskKey].totalActual += v;
+        result[group][taskKey].listRows.push(row);
+      }
     }
   }
-  Object.values(result).forEach(item => {
-    item.percent = item.contractQty > 0 ? ((item.totalActual / item.contractQty) * 100).toFixed(1) : "";
+  // Tính % hoàn thành
+  Object.values(result).forEach(groupData => {
+    Object.values(groupData).forEach(item => {
+      if (!item.contractQty || isNaN(item.contractQty) || item.contractQty <= 0) {
+        item.percent = "";
+      } else {
+        const per = (item.totalActual / item.contractQty) * 100;
+        item.percent = per > 200 ? ">200" : per.toFixed(1);
+      }
+    });
   });
   return result;
 }
@@ -170,55 +184,8 @@ export default function LanhDaoBan() {
     grouped[row.group_code].details.push(row);
   }
 
-  const progress = getTaskProgress(weeklyReports, projectTasks);
-
-  function renderAIAssessment() {
-    if (!weeklyReports.length) return <div>Không có dữ liệu.</div>;
-    const result = Object.entries(grouped).map(([group_code, data], idx) => {
-      const rows = data.details
-        .filter(row =>
-          row.note &&
-          row.note.trim() !== "" &&
-          row.note.trim().toLowerCase() !== "nan"
-        )
-        .map((row) => {
-          const matched = findProjectTask(row.sub_name, projectTasks);
-          let contractDesign = matched ? matched.design_quantity : "";
-          let percentHD = "";
-          let status = "";
-          if (matched && matched.design_quantity && row.thiet_ke) {
-            let actual = parseFloat(row.thiet_ke);
-            let planned = parseFloat(matched.design_quantity);
-            if (planned > 0) percentHD = ((actual / planned) * 100).toFixed(1);
-            status = percentHD
-              ? `${percentHD}% so với hợp đồng`
-              : "Không xác định";
-          } else {
-            status = "Không có trong hợp đồng";
-          }
-          return (
-            <div key={row.sub_code || row.sub_name}>
-              + {row.sub_name}: {row.thiet_ke || 0} ({status})<br />
-              <i style={{ color: "#1a3b6b" }}>Ghi chú: {row.note}</i>
-            </div>
-          );
-        });
-      if (rows.length === 0) return null;
-      return (
-        <div key={group_code} style={{ marginBottom: 8 }}>
-          <div>
-            <b>
-              - {group_code} {data.group_name}:
-            </b>
-          </div>
-          {rows}
-        </div>
-      );
-    });
-    if (result.filter(x => x).length === 0)
-      return <div>Không có công việc nào có ghi chú.</div>;
-    return <div>Đánh giá tổng hợp tự động: {result}</div>;
-  }
+  // Tiến độ từng nhóm/hạng mục
+  const progressByGroup = getTaskProgressByGroup(weeklyReports, projectTasks);
 
   return (
     <div className="p-4">
@@ -249,40 +216,59 @@ export default function LanhDaoBan() {
 
       <div style={{ margin: "30px 0 40px 0" }}>
         <h2 style={{ fontWeight: 700, fontSize: 25, color: "#1a3b6b" }}>
-          Tổng hợp tiến độ từng hạng mục/việc theo hợp đồng
+          Tổng hợp tiến độ từng hạng mục/việc theo hợp đồng (theo từng tuyến/hạng mục)
         </h2>
-        <table border={2} cellPadding={8} style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}>
-          <thead>
-            <tr>
-              <th>STT</th>
-              <th>Tên công việc (Hợp đồng)</th>
-              <th>Khối lượng hợp đồng</th>
-              <th>Tổng khối lượng thực hiện (tất cả tuần)</th>
-              <th>% Hoàn thành so với HĐ</th>
-              <th>Nhóm báo cáo thực tế (các tuyến/hạng mục)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {Object.values(progress).map((item, idx) => (
-              <tr key={item.task.task_name}>
-                <td>{idx + 1}</td>
-                <td>{item.task.task_name}</td>
-                <td>{item.contractQty}</td>
-                <td>{item.totalActual}</td>
-                <td>{item.percent ? `${item.percent}%` : ""}</td>
-                <td>
-                  {item.listRows.map(r =>
-                    <div key={r.sub_name + r.group_code}>
-                      <b>{r.group_name}:</b> {r.sub_name} ({r.thiet_ke})
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {Object.entries(progressByGroup).map(([groupName, groupData], i) => (
+          <div key={groupName} style={{ marginBottom: 30 }}>
+            <h3 style={{ fontWeight: 700, fontSize: 22, color: "#395989" }}>
+              {i + 1}. {groupName}
+            </h3>
+            <table border={2} cellPadding={8} style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}>
+              <thead>
+                <tr>
+                  <th>STT</th>
+                  <th>Tên công việc (Hợp đồng)</th>
+                  <th>Khối lượng hợp đồng</th>
+                  <th>Tổng khối lượng thực hiện (tất cả tuần)</th>
+                  <th>% Hoàn thành so với HĐ</th>
+                  <th>Các báo cáo thực tế (công việc tương ứng)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.values(groupData).map((item, idx) => (
+                  <tr key={item.task.task_name}>
+                    <td>{idx + 1}</td>
+                    <td>{item.task.task_name}</td>
+                    <td>
+                      {isNaN(item.contractQty) || !item.contractQty ? "" : item.contractQty}
+                    </td>
+                    <td>
+                      {isNaN(item.totalActual) || !item.totalActual ? "" : item.totalActual}
+                    </td>
+                    <td>
+                      {item.percent === "" ? "" :
+                        item.percent === ">200" ? (
+                          <span style={{ color: "red", fontWeight: 600 }}>Quá lớn</span>
+                        ) : (
+                          `${item.percent}%`
+                        )}
+                    </td>
+                    <td>
+                      {item.listRows.map(r =>
+                        <div key={r.sub_name + r.group_code}>
+                          <b>{r.group_name}:</b> {r.sub_name} ({r.thiet_ke})
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
       </div>
 
+      {/* Phần chi tiết báo cáo từng nhóm vẫn giữ nguyên */}
       {Object.entries(grouped).map(([group_code, data]) => (
         <div key={group_code} style={{ marginBottom: 28 }}>
           <h2 style={{ fontWeight: 700, fontSize: 30 }}>
@@ -329,20 +315,6 @@ export default function LanhDaoBan() {
           )}
         </div>
       ))}
-
-      <div
-        style={{
-          marginTop: 24,
-          background: "#eaffea",
-          padding: 18,
-          borderRadius: 8,
-        }}
-      >
-        <b style={{ fontSize: 22 }}>Đánh giá AI tổng hợp tự động:</b>
-        <div style={{ marginTop: 6, fontFamily: "monospace" }}>
-          {renderAIAssessment()}
-        </div>
-      </div>
     </div>
   );
 }
