@@ -3,16 +3,20 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Bộ ánh xạ từ/cụm đồng nghĩa, tiêu chuẩn ngành (có thể bổ sung thêm)
+// Bổ sung ánh xạ chuyên ngành cho so khớp tên công việc
 const jobAliasDict = [
   { match: /độ chặt yêu cầu k[=\- ]?0[.,]?98/gi, standard: "K98" },
   { match: /k=0[.,]?98/gi, standard: "K98" },
   { match: /k98/gi, standard: "K98" },
+  { match: /k[= ]?0[.,]?90/gi, standard: "K90" },
+  { match: /k90/gi, standard: "K90" },
+  { match: /đắp nền k90/gi, standard: "đắp nền K90" },
+  { match: /đắp nền k98/gi, standard: "đắp nền K98" },
   { match: /đắp đất nền đường/gi, standard: "đắp nền" },
   { match: /đắp đất/gi, standard: "đắp nền" },
   { match: /nền đường/gi, standard: "nền" },
   { match: /bê tông nhựa mặt đường/gi, standard: "BTN mặt đường" },
-  // ... bổ sung thêm tùy ngành của bạn
+  // Thêm các trường hợp khác nếu phát hiện thực tế
 ];
 
 function normalizeString(str) {
@@ -30,7 +34,7 @@ function normalizeString(str) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9 ]/g, " ")
-    .replace(/\d+/g, " ")
+    //.replace(/\d+/g, " ") // Không xóa số, để giữ lại K90, K98
     .replace(/\s+/g, " ")
     .trim();
   stopWords.forEach((sw) => {
@@ -171,13 +175,9 @@ export default function LanhDaoBan() {
   }
 
   // Đánh giá AI tổng hợp tự động: chỉ hiện các công việc có ghi chú
-  // Đánh giá AI tổng hợp tự động: chỉ hiện các công việc có ghi chú KHÁC rỗng và KHÁC "nan"
 function renderAIAssessment() {
   if (!weeklyReports.length) return <div>Không có dữ liệu.</div>;
-
-  // Gom nhóm và tạo đánh giá cho từng nhóm cha
   const result = Object.entries(grouped).map(([group_code, data], idx) => {
-    // Chỉ hiện công việc có ghi chú KHÁC rỗng và KHÁC "nan"
     const rows = data.details
       .filter(row =>
         row.note &&
@@ -190,7 +190,6 @@ function renderAIAssessment() {
         let percentHD = "";
         let status = "";
         if (matched && matched.design_quantity && row.thiet_ke) {
-          // Tính phần trăm hoàn thành so với hợp đồng
           let actual = parseFloat(row.thiet_ke);
           let planned = parseFloat(matched.design_quantity);
           if (planned > 0) percentHD = ((actual / planned) * 100).toFixed(1);
@@ -207,7 +206,6 @@ function renderAIAssessment() {
           </div>
         );
       });
-
     if (rows.length === 0) return null;
     return (
       <div key={group_code} style={{ marginBottom: 8 }}>
@@ -221,8 +219,6 @@ function renderAIAssessment() {
     );
   });
 
-
-    // Chỉ hiện nếu có ít nhất một đánh giá có ghi chú
     if (result.filter(x => x).length === 0)
       return <div>Không có công việc nào có ghi chú.</div>;
 
@@ -235,7 +231,6 @@ function renderAIAssessment() {
         <title>Báo cáo tuần và đánh giá</title>
       </Head>
       <h1 style={{ fontWeight: 800, fontSize: 40 }}>Báo cáo tuần và đánh giá</h1>
-
       <div style={{ marginBottom: 12 }}>
         <span>Từ ngày: </span>
         <input
@@ -250,22 +245,17 @@ function renderAIAssessment() {
           onChange={(e) => setToDate(e.target.value)}
         />
       </div>
-
       {error && (
         <div style={{ color: "red", fontWeight: 600 }}>{error}</div>
       )}
-
       {!error && weeklyReports.length === 0 && (
         <div>Không có dữ liệu báo cáo.</div>
       )}
-
-      {/* Hiển thị từng hạng mục cha */}
       {Object.entries(grouped).map(([group_code, data]) => (
         <div key={group_code} style={{ marginBottom: 28 }}>
           <h2 style={{ fontWeight: 700, fontSize: 30 }}>
             {group_code} - {data.group_name}
           </h2>
-          {/* Với mỗi nhóm con */}
           {data.details.length > 0 && (
             <table
               border={2}
@@ -332,7 +322,6 @@ function renderAIAssessment() {
           )}
         </div>
       ))}
-
       <div
         style={{
           marginTop: 24,
