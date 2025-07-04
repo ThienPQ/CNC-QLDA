@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Hàm normalizeString mạnh nhất cho mọi trường hợp K90, K95, K98...
+// Hàm normalize mạnh nhất, loại bỏ mọi ký tự lạ và chuẩn hóa triệt để các mã K90, K95, K98
 function normalizeString(str) {
   if (!str) return "";
   let s = str
-    .replace(/K[= :]*0[.,]?90?/gi, "K90")
-    .replace(/K[= :]*0[.,]?95/gi, "K95")
-    .replace(/K[= :]*0[.,]?98/gi, "K98");
+    .replace(/[\n\r\t"';,]+/g, " ")
+    .replace(/K[= :]*0[.,]?90?\b/gi, "K90")
+    .replace(/K[= :]*0[.,]?95\b/gi, "K95")
+    .replace(/K[= :]*0[.,]?98\b/gi, "K98");
   s = s.replace(/đắp đất nền đường/gi, "đắp nền");
   s = s.replace(/độ chặt yêu cầu/gi, "");
   s = s.replace(/đắp đất/gi, "đắp nền");
@@ -17,33 +18,23 @@ function normalizeString(str) {
   return s;
 }
 
-// Hàm extractKeyInfo vẫn giữ nguyên (nếu bạn có dùng)
-function extractKeyInfo(name) {
-  if (!name) return { keys: [], codes: [] };
-  let s = normalizeString(name);
-  const keyWords = ["cống", "hố ga", "ga", "đào", "đắp", "nền", "tuyến", "thoát nước", "cải tạo", "đá dăm", "cát", "đệm"];
-  const keys = keyWords.filter(kw => s.includes(kw));
-  let codes = (s.match(/k90|k95|k98|d\d{3,4}/gi) || []).map(x => x.toUpperCase());
-  return { keys, codes: [...new Set(codes)] };
-}
-
-// So khớp công việc hợp đồng (ưu tiên exact match, sau đó dùng mapping mềm nếu cần)
+// Hàm so khớp công việc hợp đồng chỉ dùng normalize, không điều kiện ngoài
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
   if (!n1) return null;
   let found = projectTasks.find(pt => {
     const n2 = normalizeString(pt.task_name);
+    // console.log(`So khớp "${n1}" với "${n2}"`);
     return n1 === n2;
   });
   if (found) return found;
-  // Nếu chưa có thì thử ghép mềm substring hoặc similarity (cũ)
+  // Ghép mềm nếu cần
   let foundSoft = projectTasks.find(pt => {
     const n2 = normalizeString(pt.task_name);
     return n2.includes(n1) || n1.includes(n2);
   });
   if (foundSoft) return foundSoft;
-
-  // Similarity (Levenshtein)
+  // Similarity
   let best = null, bestScore = 0.0;
   for (let pt of projectTasks) {
     const n2 = normalizeString(pt.task_name);
@@ -86,7 +77,6 @@ function similarity(a, b) {
   return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
 }
 
-// Tổng hợp tiến độ thực hiện theo task mapping toàn hệ thống (giữ nguyên như cũ)
 function getTaskProgress(weeklyReports, projectTasks) {
   const result = {};
   for (const row of weeklyReports) {
@@ -182,7 +172,6 @@ export default function LanhDaoBan() {
 
   const progress = getTaskProgress(weeklyReports, projectTasks);
 
-  // Đánh giá AI tổng hợp tự động: chỉ hiện các công việc có ghi chú KHÁC rỗng và KHÁC "nan"
   function renderAIAssessment() {
     if (!weeklyReports.length) return <div>Không có dữ liệu.</div>;
     const result = Object.entries(grouped).map(([group_code, data], idx) => {
@@ -258,7 +247,6 @@ export default function LanhDaoBan() {
         <div>Không có dữ liệu báo cáo.</div>
       )}
 
-      {/* Bảng tổng hợp tiến độ theo từng công việc mapping hợp đồng */}
       <div style={{ margin: "30px 0 40px 0" }}>
         <h2 style={{ fontWeight: 700, fontSize: 25, color: "#1a3b6b" }}>
           Tổng hợp tiến độ từng hạng mục/việc theo hợp đồng
@@ -295,7 +283,6 @@ export default function LanhDaoBan() {
         </table>
       </div>
 
-      {/* Hiển thị từng nhóm cha (tuyến/hạng mục) chi tiết */}
       {Object.entries(grouped).map(([group_code, data]) => (
         <div key={group_code} style={{ marginBottom: 28 }}>
           <h2 style={{ fontWeight: 700, fontSize: 30 }}>
@@ -343,7 +330,6 @@ export default function LanhDaoBan() {
         </div>
       ))}
 
-      {/* Đánh giá AI tổng hợp tự động */}
       <div
         style={{
           marginTop: 24,
