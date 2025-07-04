@@ -2,63 +2,55 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Ánh xạ và chuẩn hóa tên việc (như các bản trước, bổ sung thêm)
-const jobAliasDict = [
-  { match: /k[= ]?0[.,]?90/gi, standard: "K90" },
-  { match: /k=0[.,]?9/gi, standard: "K90" },
-  { match: /k90/gi, standard: "K90" },
-  { match: /đắp nền k90/gi, standard: "đắp nền K90" },
-  { match: /đắp nền/gi, standard: "đắp nền" },
-  // Thêm các mẫu khác nếu cần
-];
-
-function normalizeString(str) {
+// Hàm chuyển mã số kỹ thuật về dạng chuẩn, ví dụ: K=0,9; K=0.90; K 90 => K90
+function standardizeKcode(str) {
   if (!str) return "";
-  let s = str.toLowerCase();
-  jobAliasDict.forEach(({ match, standard }) => {
-    s = s.replace(match, standard);
-  });
-  const stopWords = [
-    "thi cong", "hang muc", "cong viec", "duong", "cau", "nut giao", "tuyen",
-    "bao cao", "hop dong", "cong trinh", "khoi luong", "bo sung", "nhua mat",
-    "dat", "lop", "xay dung", "thiet ke"
-  ];
-  s = s
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9 ]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  stopWords.forEach((sw) => {
-    s = s.replace(new RegExp(`\\b${sw}\\b`, "g"), "");
-  });
-  return s.replace(/\s+/g, " ").trim();
+  // Chuẩn hóa các mã kiểu K=0,9 hoặc K=0.90 hoặc K 90 về K90
+  return str.replace(/k[ =:]*0[.,]?9{1,2}/gi, "K90")
+            .replace(/k[ =:]*0[.,]?95/gi, "K95")
+            .replace(/k[ =:]*0[.,]?98/gi, "K98");
 }
 
-// Tách key, code phục vụ mapping mềm
+// Chuẩn hóa tên công việc
+function normalizeString(str) {
+  if (!str) return "";
+  let s = standardizeKcode(str);
+  s = s.toLowerCase();
+  const dict = [
+    { match: /đắp đất nền đường/gi, standard: "đắp nền" },
+    { match: /đắp nền đường/gi, standard: "đắp nền" },
+    { match: /đắp đất/gi, standard: "đắp nền" },
+    { match: /nền đường/gi, standard: "nền" },
+    { match: /bê tông nhựa mặt đường/gi, standard: "btn mặt đường" }
+  ];
+  dict.forEach(({ match, standard }) => { s = s.replace(match, standard); });
+  s = s.replace(/[^a-z0-9 k]/g, " "); // bỏ ký tự lạ, giữ chữ/số/k/cách
+  s = s.replace(/\s+/g, " ").trim();
+  // Chỉ giữ lại số và chữ, gom hết "k 90", "k=0,9" thành "k90"
+  s = s.replace(/k[\s=:]*90/gi, "k90")
+       .replace(/k[\s=:]*95/gi, "k95")
+       .replace(/k[\s=:]*98/gi, "k98");
+  return s;
+}
+
+// Hàm tách key chính và mã kỹ thuật
 function extractKeyInfo(name) {
   if (!name) return { keys: [], codes: [] };
-  let s = name.toLowerCase();
+  let s = normalizeString(name);
   const keyWords = ["cống", "hố ga", "ga", "đào", "đắp", "nền", "tuyến", "thoát nước", "cải tạo", "đá dăm", "cát", "đệm"];
   const keys = keyWords.filter(kw => s.includes(kw));
   let codes = [];
-  const codeReg = /[dk][ =]?\.?\d{1,4}/gi;
-  let match;
-  while ((match = codeReg.exec(s))) {
-    codes.push(match[0].replace(/[^a-z0-9]/gi, "").toUpperCase());
-  }
-  const extra = s.match(/d\d{3,4}/gi) || [];
-  codes.push(...extra.map(x => x.toUpperCase()));
+  // Lấy các mã k90, k95, k98, d600, d800
+  codes = (s.match(/k90|k95|k98|d\d{3,4}/gi) || []).map(x => x.toUpperCase());
   return { keys, codes: [...new Set(codes)] };
 }
 
-// Matching
+// So khớp mềm
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
   if (!n1) return null;
   const info1 = extractKeyInfo(subName);
-
-  // Exact/contains hoặc ghép mềm theo key+code
+  // Exact/contains hoặc key+code
   let found = projectTasks.find(pt => {
     const n2 = normalizeString(pt.task_name);
     if (n1 === n2 || n2.includes(n1) || n1.includes(n2)) return true;
@@ -68,8 +60,7 @@ function findProjectTask(subName, projectTasks) {
     return false;
   });
   if (found) return found;
-
-  // Similarity matching
+  // Similarity
   let best = null;
   let bestScore = 0.0;
   for (let pt of projectTasks) {
@@ -84,7 +75,7 @@ function findProjectTask(subName, projectTasks) {
   return null;
 }
 
-// Similarity như trước
+// Similarity (Levenshtein)
 function similarity(a, b) {
   if (!a || !b) return 0;
   if (a === b) return 1;
@@ -116,13 +107,11 @@ function similarity(a, b) {
 
 // Tổng khối lượng thực hiện theo task mapping toàn hệ thống
 function getTaskProgress(weeklyReports, projectTasks) {
-  // Kết quả: {taskId: {task, totalActual, contractQty, percent, listRows: []}}
   const result = {};
-
   for (const row of weeklyReports) {
     const matched = findProjectTask(row.sub_name, projectTasks);
     if (matched) {
-      const key = matched.task_name; // có thể dùng task_code nếu cần
+      const key = matched.task_name;
       if (!result[key]) {
         result[key] = {
           task: matched,
@@ -135,8 +124,6 @@ function getTaskProgress(weeklyReports, projectTasks) {
       result[key].listRows.push(row);
     }
   }
-
-  // Tính phần trăm hoàn thành
   Object.values(result).forEach(item => {
     item.percent = item.contractQty > 0 ? ((item.totalActual / item.contractQty) * 100).toFixed(1) : "";
   });
@@ -212,8 +199,56 @@ export default function LanhDaoBan() {
     grouped[row.group_code].details.push(row);
   }
 
-  // Tổng hợp tiến độ theo task mapping toàn hệ thống
   const progress = getTaskProgress(weeklyReports, projectTasks);
+
+  // Đánh giá AI tổng hợp: chỉ hiện các công việc có ghi chú KHÁC rỗng và KHÁC "nan"
+  function renderAIAssessment() {
+    if (!weeklyReports.length) return <div>Không có dữ liệu.</div>;
+    const result = Object.entries(grouped).map(([group_code, data], idx) => {
+      const rows = data.details
+        .filter(row =>
+          row.note &&
+          row.note.trim() !== "" &&
+          row.note.trim().toLowerCase() !== "nan"
+        )
+        .map((row) => {
+          const matched = findProjectTask(row.sub_name, projectTasks);
+          let contractDesign = matched ? matched.design_quantity : "";
+          let percentHD = "";
+          let status = "";
+          if (matched && matched.design_quantity && row.thiet_ke) {
+            let actual = parseFloat(row.thiet_ke);
+            let planned = parseFloat(matched.design_quantity);
+            if (planned > 0) percentHD = ((actual / planned) * 100).toFixed(1);
+            status = percentHD
+              ? `${percentHD}% so với hợp đồng`
+              : "Không xác định";
+          } else {
+            status = "Không có trong hợp đồng";
+          }
+          return (
+            <div key={row.sub_code || row.sub_name}>
+              + {row.sub_name}: {row.thiet_ke || 0} ({status})<br />
+              <i style={{ color: "#1a3b6b" }}>Ghi chú: {row.note}</i>
+            </div>
+          );
+        });
+      if (rows.length === 0) return null;
+      return (
+        <div key={group_code} style={{ marginBottom: 8 }}>
+          <div>
+            <b>
+              - {group_code} {data.group_name}:
+            </b>
+          </div>
+          {rows}
+        </div>
+      );
+    });
+    if (result.filter(x => x).length === 0)
+      return <div>Không có công việc nào có ghi chú.</div>;
+    return <div>Đánh giá tổng hợp tự động: {result}</div>;
+  }
 
   return (
     <div className="p-4">
@@ -326,6 +361,21 @@ export default function LanhDaoBan() {
           )}
         </div>
       ))}
+
+      {/* Đánh giá AI tổng hợp tự động */}
+      <div
+        style={{
+          marginTop: 24,
+          background: "#eaffea",
+          padding: 18,
+          borderRadius: 8,
+        }}
+      >
+        <b style={{ fontSize: 22 }}>Đánh giá AI tổng hợp tự động:</b>
+        <div style={{ marginTop: 6, fontFamily: "monospace" }}>
+          {renderAIAssessment()}
+        </div>
+      </div>
     </div>
   );
 }
