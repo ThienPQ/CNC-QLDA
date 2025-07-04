@@ -2,67 +2,49 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Hàm chuyển mã số kỹ thuật về dạng chuẩn, ví dụ: K=0,9; K=0.90; K 90 => K90
-function standardizeKcode(str) {
-  if (!str) return "";
-  // Chuẩn hóa các mã kiểu K=0,9 hoặc K=0.90 hoặc K 90 về K90
-  return str.replace(/k[ =:]*0[.,]?9{1,2}/gi, "K90")
-            .replace(/k[ =:]*0[.,]?95/gi, "K95")
-            .replace(/k[ =:]*0[.,]?98/gi, "K98");
-}
-
-// Chuẩn hóa tên công việc
+// Hàm normalizeString mạnh nhất cho mọi trường hợp K90, K95, K98...
 function normalizeString(str) {
   if (!str) return "";
-  let s = standardizeKcode(str);
-  s = s.toLowerCase();
-  const dict = [
-    { match: /đắp đất nền đường/gi, standard: "đắp nền" },
-    { match: /đắp nền đường/gi, standard: "đắp nền" },
-    { match: /đắp đất/gi, standard: "đắp nền" },
-    { match: /nền đường/gi, standard: "nền" },
-    { match: /bê tông nhựa mặt đường/gi, standard: "btn mặt đường" }
-  ];
-  dict.forEach(({ match, standard }) => { s = s.replace(match, standard); });
-  s = s.replace(/[^a-z0-9 k]/g, " "); // bỏ ký tự lạ, giữ chữ/số/k/cách
-  s = s.replace(/\s+/g, " ").trim();
-  // Chỉ giữ lại số và chữ, gom hết "k 90", "k=0,9" thành "k90"
-  s = s.replace(/k[\s=:]*90/gi, "k90")
-       .replace(/k[\s=:]*95/gi, "k95")
-       .replace(/k[\s=:]*98/gi, "k98");
+  let s = str
+    .replace(/K[= :]*0[.,]?90?/gi, "K90")
+    .replace(/K[= :]*0[.,]?95/gi, "K95")
+    .replace(/K[= :]*0[.,]?98/gi, "K98");
+  s = s.replace(/đắp đất nền đường/gi, "đắp nền");
+  s = s.replace(/độ chặt yêu cầu/gi, "");
+  s = s.replace(/đắp đất/gi, "đắp nền");
+  s = s.replace(/[^a-zA-Z0-9 ]/g, " ");
+  s = s.toLowerCase().replace(/\s+/g, " ").trim();
   return s;
 }
 
-// Hàm tách key chính và mã kỹ thuật
+// Hàm extractKeyInfo vẫn giữ nguyên (nếu bạn có dùng)
 function extractKeyInfo(name) {
   if (!name) return { keys: [], codes: [] };
   let s = normalizeString(name);
   const keyWords = ["cống", "hố ga", "ga", "đào", "đắp", "nền", "tuyến", "thoát nước", "cải tạo", "đá dăm", "cát", "đệm"];
   const keys = keyWords.filter(kw => s.includes(kw));
-  let codes = [];
-  // Lấy các mã k90, k95, k98, d600, d800
-  codes = (s.match(/k90|k95|k98|d\d{3,4}/gi) || []).map(x => x.toUpperCase());
+  let codes = (s.match(/k90|k95|k98|d\d{3,4}/gi) || []).map(x => x.toUpperCase());
   return { keys, codes: [...new Set(codes)] };
 }
 
-// So khớp mềm
+// So khớp công việc hợp đồng (ưu tiên exact match, sau đó dùng mapping mềm nếu cần)
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
   if (!n1) return null;
-  const info1 = extractKeyInfo(subName);
-  // Exact/contains hoặc key+code
   let found = projectTasks.find(pt => {
     const n2 = normalizeString(pt.task_name);
-    if (n1 === n2 || n2.includes(n1) || n1.includes(n2)) return true;
-    const info2 = extractKeyInfo(pt.task_name);
-    if (info1.keys.some(k => info2.keys.includes(k)) &&
-        info1.codes.some(c => info2.codes.includes(c))) return true;
-    return false;
+    return n1 === n2;
   });
   if (found) return found;
-  // Similarity
-  let best = null;
-  let bestScore = 0.0;
+  // Nếu chưa có thì thử ghép mềm substring hoặc similarity (cũ)
+  let foundSoft = projectTasks.find(pt => {
+    const n2 = normalizeString(pt.task_name);
+    return n2.includes(n1) || n1.includes(n2);
+  });
+  if (foundSoft) return foundSoft;
+
+  // Similarity (Levenshtein)
+  let best = null, bestScore = 0.0;
   for (let pt of projectTasks) {
     const n2 = normalizeString(pt.task_name);
     let score = similarity(n1, n2);
@@ -75,7 +57,6 @@ function findProjectTask(subName, projectTasks) {
   return null;
 }
 
-// Similarity (Levenshtein)
 function similarity(a, b) {
   if (!a || !b) return 0;
   if (a === b) return 1;
@@ -105,7 +86,7 @@ function similarity(a, b) {
   return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
 }
 
-// Tổng khối lượng thực hiện theo task mapping toàn hệ thống
+// Tổng hợp tiến độ thực hiện theo task mapping toàn hệ thống (giữ nguyên như cũ)
 function getTaskProgress(weeklyReports, projectTasks) {
   const result = {};
   for (const row of weeklyReports) {
@@ -201,7 +182,7 @@ export default function LanhDaoBan() {
 
   const progress = getTaskProgress(weeklyReports, projectTasks);
 
-  // Đánh giá AI tổng hợp: chỉ hiện các công việc có ghi chú KHÁC rỗng và KHÁC "nan"
+  // Đánh giá AI tổng hợp tự động: chỉ hiện các công việc có ghi chú KHÁC rỗng và KHÁC "nan"
   function renderAIAssessment() {
     if (!weeklyReports.length) return <div>Không có dữ liệu.</div>;
     const result = Object.entries(grouped).map(([group_code, data], idx) => {
