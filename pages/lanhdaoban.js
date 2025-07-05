@@ -2,19 +2,10 @@ import { useEffect, useState, useMemo } from "react";
 import axios from "axios";
 import Head from "next/head";
 
-// Helper: Ghép khối lượng hợp đồng từ projectTasks theo task_name (hoặc sub_name)
-function getContractQuantity(taskName, projectTasks) {
-  if (!taskName) return "";
-  const matched = projectTasks.find(t =>
-    (t.task_name || "").trim().toLowerCase() === taskName.trim().toLowerCase()
-  );
-  if (!matched) return "";
-  // Nếu design_quantity là số kiểu "1.000" => ép kiểu giữ số 1000
-  let qty = matched.design_quantity || "";
-  if (typeof qty === "string" && /^\d+\.\d{3}$/.test(qty)) {
-    qty = qty.replace(/\./g, "");
-  }
-  return qty;
+// Helper: so sánh tên công việc linh hoạt
+function matchTaskName(nameA, nameB) {
+  if (!nameA || !nameB) return false;
+  return nameA.trim().toLowerCase() === nameB.trim().toLowerCase();
 }
 
 export default function LanhDaoBan() {
@@ -47,12 +38,10 @@ export default function LanhDaoBan() {
     fetchData();
   }, []);
 
-  // --- Xử lý dữ liệu cộng dồn tổng thực hiện ---
+  // Chuẩn hóa và nhóm dữ liệu để luôn hiển thị dù ghép tên sai
   const dataTree = useMemo(() => {
-    // Gom theo group_code -> route -> task_name
     const tree = {};
-    // Để cộng dồn từng công việc/tuyến
-    const allSum = {};
+    const sumMap = {};
 
     weeklyReports.forEach(row => {
       const group_code = row.group_code || "";
@@ -61,38 +50,40 @@ export default function LanhDaoBan() {
       const taskName = row.sub_name || row.task_name || "";
 
       if (!group_code || !route || !taskName) return;
-      // Tạo key gom nhóm
+      // Gom key công việc
       const key = [group_code, route, taskName].join("||");
-      if (!allSum[key]) allSum[key] = { sum: 0, notes: [], lastNote: "", lastDate: "" };
+      if (!sumMap[key]) sumMap[key] = { sum: 0, lastNote: "", lastDate: "" };
 
-      // Thiet_ke là số thực hiện tuần này
       let thk = Number(row.thiet_ke || 0);
       if (!isNaN(thk)) {
-        allSum[key].sum += thk;
+        sumMap[key].sum += thk;
       }
-      // Ghi chú tuần mới nhất theo ngày
       if (row.note && row.note !== "nan") {
-        if (!allSum[key].lastDate || row.to_date > allSum[key].lastDate) {
-          allSum[key].lastDate = row.to_date;
-          allSum[key].lastNote = row.note;
+        if (!sumMap[key].lastDate || row.to_date > sumMap[key].lastDate) {
+          sumMap[key].lastDate = row.to_date;
+          sumMap[key].lastNote = row.note;
         }
       }
 
-      // Nhóm vào cây hiển thị
       if (!tree[group_code]) tree[group_code] = { group_name, routes: {} };
       if (!tree[group_code].routes[route]) tree[group_code].routes[route] = {};
-      if (!tree[group_code].routes[route][taskName]) tree[group_code].routes[route][taskName] = [];
-      tree[group_code].routes[route][taskName].push(row);
+      if (!tree[group_code].routes[route][taskName]) tree[group_code].routes[route][taskName] = true;
     });
 
-    // Bổ sung trường sum thực hiện, hợp đồng, % hoàn thành, ghi chú tuần mới nhất vào từng task
+    // Gắn khối lượng HĐ nếu tìm thấy, nếu không thì để trống, nhưng luôn hiển thị
     Object.keys(tree).forEach(group_code => {
       Object.keys(tree[group_code].routes).forEach(route => {
         Object.keys(tree[group_code].routes[route]).forEach(taskName => {
-          const contractQty = getContractQuantity(taskName, projectTasks);
-          const sumThk = allSum[[group_code, route, taskName].join("||")].sum;
-          const note = allSum[[group_code, route, taskName].join("||")].lastNote;
-          // Chỉ lấy 1 dòng duy nhất cho 1 task để hiển thị gọn bảng
+          // Ghép hợp đồng rất linh hoạt: chỉ lấy khối lượng đầu tiên ghép được
+          let contractQty = "";
+          for (let pt of projectTasks) {
+            if (matchTaskName(pt.task_name, taskName)) {
+              contractQty = pt.design_quantity || "";
+              break;
+            }
+          }
+          const sumThk = sumMap[[group_code, route, taskName].join("||")].sum;
+          const note = sumMap[[group_code, route, taskName].join("||")].lastNote;
           tree[group_code].routes[route][taskName] = [{
             taskName,
             contractQty,
