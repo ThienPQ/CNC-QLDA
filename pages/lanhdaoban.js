@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Chuẩn hóa tên công việc (để nhận diện "Vét hữu cơ")
+// --- Chuẩn hóa tên công việc để nhận diện "Vét hữu cơ"
 function normalizeString(str) {
   if (!str) return "";
   let s = str
@@ -42,37 +42,6 @@ function formatNumber(num) {
   return num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Ghép các tuần báo cáo cho 1 công việc
-function groupBySectionAndRouteAllWeeks(weeklyReports, projectTasks) {
-  // Gom tất cả báo cáo cùng tên công việc + tuyến + hạng mục
-  const key = (row, matched) =>
-    [
-      row.group_code || "",
-      row.group_sub_code || row.tuyen || row.tuyen_name || row.sub_group || row.route || "",
-      normalizeString(matched ? matched.task_name : row.sub_name),
-    ].join("|");
-  const all = {};
-  for (const row of weeklyReports) {
-    const matched = findProjectTask(row.sub_name, projectTasks);
-    if (!matched) continue;
-    const k = key(row, matched);
-    if (!all[k]) all[k] = [];
-    all[k].push({
-      group_code: row.group_code,
-      group_name: row.group_name,
-      route: row.group_sub_code || row.tuyen || row.tuyen_name || row.sub_group || row.route || "",
-      task_name: matched.task_name,
-      date: row.to_date,
-      week: row.week,
-      actual: row.thiet_ke ? parseFloat(row.thiet_ke) : 0,
-      note: row.note === "nan" ? "" : row.note,
-    });
-  }
-  // Sort tuần mới nhất lên đầu
-  Object.values(all).forEach(list => list.sort((a, b) => (b.date > a.date ? 1 : -1)));
-  return all;
-}
-
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
   if (!n1) return null;
@@ -81,6 +50,19 @@ function findProjectTask(subName, projectTasks) {
     return n1 === n2;
   });
   return found || null;
+}
+
+function calcContractQuantity(val, unit) {
+  let num = parseVnContractNumber(val);
+  if (!unit) return num;
+  let match = unit.match(/^(\d+)\s*(m3|m2|m)$/i);
+  if (match) {
+    let factor = Number(match[1]);
+    if (!isNaN(factor)) {
+      return num * factor;
+    }
+  }
+  return num;
 }
 
 export default function LanhDaoBan() {
@@ -141,16 +123,77 @@ export default function LanhDaoBan() {
     fetchData();
   }, [fromDate, toDate]);
 
-  // Gom báo cáo cùng nhóm, tuyến, công việc
-  const allWorks = groupBySectionAndRouteAllWeeks(weeklyReports, projectTasks);
+  // PHÂN NHÓM CHUẨN VIỆT NAM: chỉ lấy tuyến là số, không a), không "chưa rõ tuyến"
+  const groupCodes = useMemo(() => [...new Set(weeklyReports.map(row => row.group_code).filter(Boolean))], [weeklyReports]);
+  const groupNames = useMemo(() => {
+    const names = {};
+    weeklyReports.forEach(row => {
+      if (row.group_code) names[row.group_code] = row.group_name || names[row.group_code] || "";
+    });
+    return names;
+  }, [weeklyReports]);
+  // Gom tuyến dạng số
+  const groupedData = useMemo(() => {
+    const data = {};
+    weeklyReports.forEach(row => {
+      const group_code = row.group_code || "";
+      if (!group_code) return;
+      let route = (row.group_sub_code || row.tuyen || row.tuyen_name || row.route || "").toString().trim();
+      if (!/^\d+$/.test(route)) return; // Chỉ lấy tuyến là số nguyên dương
+      if (!data[group_code]) data[group_code] = {};
+      if (!data[group_code][route]) data[group_code][route] = [];
+      // Chuẩn hóa số liệu hiển thị
+      // Map đúng công việc từ hợp đồng nếu có
+      const matched = findProjectTask(row.sub_name, projectTasks);
+      let contractQty = "";
+      if (matched) {
+        contractQty = normalizeString(matched.task_name) === "vet huu co"
+          ? "153120"
+          : formatNumber(calcContractQuantity(matched.design_quantity, matched.unit || matched.donvi || matched.dvt));
+      }
+      data[group_code][route].push({
+        ...row,
+        contractQty,
+        totalActual: formatNumber(row.thiet_ke ? parseFloat(row.thiet_ke) : 0),
+        percent: contractQty && parseFloat(contractQty) > 0 && row.thiet_ke
+          ? ((parseFloat(row.thiet_ke) / parseFloat(contractQty)) * 100 > 200
+              ? "Quá lớn"
+              : ((parseFloat(row.thiet_ke) / parseFloat(contractQty)) * 100).toFixed(2) + "%")
+          : "",
+      });
+    });
+    return data;
+  }, [weeklyReports, projectTasks]);
 
-  // Nhận diện ghi chú tuần mới nhất
+  // Đánh giá AI
   function handleAIDanhGia() {
+    // Gom báo cáo cùng nhóm, tuyến, công việc
+    const allWorks = {};
+    weeklyReports.forEach(row => {
+      const matched = findProjectTask(row.sub_name, projectTasks);
+      if (!matched) return;
+      let group_code = row.group_code || "";
+      let route = (row.group_sub_code || row.tuyen || row.tuyen_name || row.route || "").toString().trim();
+      if (!/^\d+$/.test(route)) return;
+      const taskKey = [group_code, route, normalizeString(matched.task_name)].join("|");
+      if (!allWorks[taskKey]) allWorks[taskKey] = [];
+      allWorks[taskKey].push({
+        group_code,
+        group_name: row.group_name,
+        route,
+        task_name: matched.task_name,
+        date: row.to_date,
+        actual: row.thiet_ke ? parseFloat(row.thiet_ke) : 0,
+        note: row.note === "nan" ? "" : row.note,
+      });
+    });
+    // Sort tuần mới nhất lên đầu
+    Object.values(allWorks).forEach(list => list.sort((a, b) => (b.date < a.date ? 1 : -1)));
+
     let out = [];
     Object.values(allWorks).forEach(list => {
       if (list.length === 0) return;
       const cur = list[0];
-      // Lấy tuần trước đó (nếu có)
       const prev = list[1];
       if (cur.note && cur.note.trim() !== "") {
         let chenhLech = "";
@@ -159,32 +202,23 @@ export default function LanhDaoBan() {
           else if (cur.actual < prev.actual) chenhLech = `Khối lượng tuần này giảm so với tuần trước (${formatNumber(prev.actual)} ➔ ${formatNumber(cur.actual)}). `;
           else chenhLech = `Khối lượng tuần này không đổi so với tuần trước (${formatNumber(cur.actual)}). `;
         } else {
-          chenhLech = `Không có số liệu tuần trước để so sánh.`;
+          chenhLech = `Không có số liệu tuần trước để so sánh. `;
         }
-        // Đưa ra nhận xét và chỉ đạo
         let xuLy = "";
         const ghiChu = cur.note.toLowerCase();
-        if (ghiChu.includes("mưa")) xuLy = "Chỉ đạo: Chủ động máy bơm, bố trí che chắn, điều chỉnh tiến độ phù hợp khi trời mưa.";
-        else if (ghiChu.includes("thiếu vật liệu")) xuLy = "Chỉ đạo: Yêu cầu nhà thầu bổ sung vật liệu kịp thời, tránh ảnh hưởng tiến độ.";
-        else if (ghiChu.includes("thiếu nhân lực")) xuLy = "Chỉ đạo: Bổ sung nhân lực, chia ca hợp lý để đẩy nhanh tiến độ.";
-        else if (ghiChu.includes("mặt bằng") || ghiChu.includes("giải phóng mặt bằng")) xuLy = "Chỉ đạo: Đề nghị địa phương hỗ trợ đẩy nhanh giải phóng mặt bằng.";
-        else xuLy = "Chỉ đạo: Theo dõi sát, đề xuất biện pháp khắc phục phù hợp.";
-
+        if (ghiChu.includes("mưa")) xuLy = "Chỉ đạo: Chủ động máy bơm, che chắn, điều chỉnh tiến độ khi trời mưa.";
+        else if (ghiChu.includes("thiếu vật liệu")) xuLy = "Chỉ đạo: Bổ sung vật liệu ngay, tránh ảnh hưởng tiến độ.";
+        else if (ghiChu.includes("thiếu nhân lực")) xuLy = "Chỉ đạo: Bổ sung nhân lực, chia ca hợp lý.";
+        else if (ghiChu.includes("mặt bằng") || ghiChu.includes("giải phóng mặt bằng")) xuLy = "Chỉ đạo: Đề nghị địa phương đẩy nhanh giải phóng mặt bằng.";
+        else xuLy = "Chỉ đạo: Theo dõi, đề xuất biện pháp khắc phục phù hợp.";
         out.push(
-          `- [${cur.group_name || cur.group_code || ""}] ${cur.route ? "Tuyến " + cur.route + ", " : ""}${cur.task_name}: ${chenhLech}Ghi chú: "${cur.note}". ${xuLy}`
+          `- [${cur.group_name || cur.group_code || ""}] Tuyến ${cur.route}, ${cur.task_name}: ${chenhLech}Ghi chú: "${cur.note}". ${xuLy}`
         );
       }
     });
-    if (out.length === 0) {
-      setAiText("Không có công việc nào có ghi chú để đánh giá.");
-    } else {
-      setAiText(out.join("\n\n"));
-    }
+    if (out.length === 0) setAiText("Không có công việc nào có ghi chú để đánh giá.");
+    else setAiText(out.join("\n\n"));
   }
-
-  // Phần giao diện bảng báo cáo như trước (không đổi)
-  // ... copy lại giao diện bảng báo cáo như các code trước ...
-  // (bạn có thể copy phần bảng đã dùng, không ảnh hưởng logic đánh giá AI)
 
   return (
     <div className="p-4">
@@ -213,7 +247,49 @@ export default function LanhDaoBan() {
         <div>Không có dữ liệu báo cáo.</div>
       )}
 
-      {/* ... bảng tổng hợp tiến độ từng hạng mục/việc như cũ ... */}
+      <div style={{ margin: "30px 0 40px 0" }}>
+        <h2 style={{ fontWeight: 700, fontSize: 25, color: "#1a3b6b" }}>
+          Tổng hợp tiến độ từng hạng mục/việc theo hợp đồng (theo từng tuyến/hạng mục)
+        </h2>
+        {groupCodes.map((group_code, i) => (
+          <div key={group_code} style={{ marginBottom: 30 }}>
+            <h3 style={{ fontWeight: 700, fontSize: 32, color: "#395989" }}>
+              {String.fromCharCode(73 + i)}. {groupNames[group_code] || group_code}
+            </h3>
+            {Object.keys(groupedData[group_code] || {}).sort((a,b)=>Number(a)-Number(b)).map((route, idx) => (
+              <div key={route} style={{ marginBottom: 14 }}>
+                <h4 style={{ fontWeight: 700, fontSize: 24, color: "#234b73" }}>
+                  {idx + 1}. Tuyến {route}
+                </h4>
+                <table border={2} cellPadding={8} style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}>
+                  <thead>
+                    <tr>
+                      <th>STT</th>
+                      <th>Tên công việc (Hợp đồng)</th>
+                      <th>Khối lượng hợp đồng</th>
+                      <th>Tổng khối lượng thực hiện (tất cả tuần)</th>
+                      <th>% Hoàn thành so với HĐ</th>
+                      <th>Ghi chú tuần mới nhất</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {groupedData[group_code][route].map((item, tIdx) => (
+                      <tr key={tIdx}>
+                        <td>{tIdx + 1}</td>
+                        <td>{item.sub_name || item.task_name}</td>
+                        <td>{item.contractQty}</td>
+                        <td>{item.totalActual}</td>
+                        <td>{item.percent}</td>
+                        <td>{item.note && item.note !== "nan" ? item.note : ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
 
       <button
         onClick={handleAIDanhGia}
