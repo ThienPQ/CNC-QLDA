@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Hàm chuẩn hóa tên công việc: mapping mọi dạng K90, K95, K98, v.v.
+// Tối ưu hóa so khớp tên công việc (như cũ)
 function normalizeString(str) {
   if (!str) return "";
   let s = str
@@ -21,35 +21,18 @@ function normalizeString(str) {
   return s;
 }
 
-// Đọc số thực hiện tuần: phân biệt mọi kiểu chuỗi số Việt Nam/Châu Âu/Mỹ
-function parseWeekValue(str) {
-  if (typeof str === "number") return str;
-  if (!str) return 0;
-  if (str.includes(".") && str.includes(",")) {
-    // "1.234,56" → "1234.56"
-    return parseFloat(str.replace(/\./g, "").replace(",", "."));
-  }
-  if (!str.includes(".") && str.includes(",")) {
-    // "153,12" → "153.12"
-    return parseFloat(str.replace(",", "."));
-  }
-  // Chỉ có số và chấm (kiểu Mỹ hoặc JS): "153.12"
-  return parseFloat(str);
+// Đọc số thực hiện tuần (đã chuẩn)
+function parseWeekValue(val) {
+  if (typeof val === "number") return val;
+  if (!val) return 0;
+  return parseFloat(val);
 }
 
-// Đọc số hợp đồng: loại mọi trường hợp mất dấu
-function calcContractQuantity(design_quantity, unit) {
-  if (typeof design_quantity === "number") return design_quantity;
-  if (!design_quantity) return 0;
-  let str = String(design_quantity);
-  if (str.includes(",") && str.includes(".")) {
-    str = str.replace(/\./g, "").replace(",", ".");
-  } else if (str.includes(".") && !str.includes(",")) {
-    str = str.replace(/\./g, "");
-  } else if (str.includes(",")) {
-    str = str.replace(",", ".");
-  }
-  let num = Number(str);
+// Đọc số hợp đồng (đã chuẩn)
+function calcContractQuantity(val, unit) {
+  if (typeof val === "number") return val;
+  if (!val) return 0;
+  let num = parseFloat(val);
   if (!unit) return num;
   let match = unit.match(/^(\d+)\s*(m3|m2|m)$/i);
   if (match) {
@@ -61,7 +44,7 @@ function calcContractQuantity(design_quantity, unit) {
   return num;
 }
 
-// So khớp công việc hợp đồng
+// So khớp công việc hợp đồng (như trước)
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
   if (!n1) return null;
@@ -88,7 +71,6 @@ function findProjectTask(subName, projectTasks) {
   return null;
 }
 
-// Độ tương đồng tên (Levenshtein)
 function similarity(a, b) {
   if (!a || !b) return 0;
   if (a === b) return 1;
@@ -284,13 +266,13 @@ export default function LanhDaoBan() {
                       {(isNaN(item.contractQty) || !item.contractQty)
                         ? ""
                         : (item.contractQty < 1
-                          ? <span style={{ color: "orange", fontWeight: 600 }}>{item.contractQty} ⚠️</span>
-                          : item.contractQty
+                          ? <span style={{ color: "orange", fontWeight: 600 }}>{Math.round(item.contractQty * 100) / 100} ⚠️</span>
+                          : Math.round(item.contractQty * 100) / 100
                         )
                       }
                     </td>
                     <td>
-                      {isNaN(item.totalActual) || !item.totalActual ? "" : item.totalActual}
+                      {isNaN(item.totalActual) || !item.totalActual ? "" : Math.round(item.totalActual * 100) / 100}
                     </td>
                     <td>
                       {item.percent === "" ? "" :
