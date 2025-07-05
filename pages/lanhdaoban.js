@@ -6,27 +6,27 @@ import axios from "axios";
 function normalizeString(str) {
   if (!str) return "";
   let s = str
+    .replace(/đắp đất nền đường, độ chặt yêu cầu k[= ]*0[.,]?90/gi, "đắp nền k90")
+    .replace(/đắp đất nền đường, độ chặt yêu cầu k[= ]*0[.,]?95/gi, "đắp nền k95")
+    .replace(/đắp đất nền đường, độ chặt yêu cầu k[= ]*0[.,]?98/gi, "đắp nền k98")
+    .replace(/đắp đất nền đường/gi, "đắp nền")
+    .replace(/độ chặt yêu cầu/gi, "")
+    .replace(/đắp đất/gi, "đắp nền")
     .replace(/[\n\r\t"';,]+/g, " ")
     .replace(/K[= :]*0[.,]?90?\b/gi, "K90")
     .replace(/K[= :]*0[.,]?95\b/gi, "K95")
     .replace(/K[= :]*0[.,]?98\b/gi, "K98");
-  s = s.replace(/đắp đất nền đường/gi, "đắp nền");
-  s = s.replace(/độ chặt yêu cầu/gi, "");
-  s = s.replace(/đắp đất/gi, "đắp nền");
   s = s.replace(/[^a-zA-Z0-9 ]/g, " ");
   s = s.toLowerCase().replace(/\s+/g, " ").trim();
   return s;
 }
 
-// CHUẨN HÓA SỐ KHỐI LƯỢNG HỢP ĐỒNG (loại . và ,)
+// Chuẩn hóa số cho hợp đồng: chỉ bỏ dấu chấm ngăn nghìn, giữ phẩy cho thập phân
 function calcContractQuantity(design_quantity, unit) {
   if (!design_quantity) return 0;
-  // Loại bỏ mọi dấu . và , để không bị mất số không!
-  let numStr = String(design_quantity).replace(/[.,]/g, "");
-  let num = Number(numStr);
+  let numStr = String(design_quantity).replace(/\./g, "");
+  let num = Number(numStr.replace(",", "."));
   if (!unit) return num;
-
-  // Tìm xem unit có dạng "100m3", "100m2", "100m"
   let match = unit.match(/^(\d+)\s*(m3|m2|m)$/i);
   if (match) {
     let factor = Number(match[1]);
@@ -35,6 +35,12 @@ function calcContractQuantity(design_quantity, unit) {
     }
   }
   return num;
+}
+
+// Chuẩn hóa số cho thực hiện tuần: bỏ chấm, phẩy thành chấm
+function parseWeekValue(str) {
+  if (!str) return 0;
+  return parseFloat(String(str).replace(/\./g, "").replace(",", "."));
 }
 
 // So khớp công việc hợp đồng
@@ -108,12 +114,12 @@ function getTaskProgressByGroup(weeklyReports, projectTasks) {
           totalActual: 0,
           contractQty: calcContractQuantity(
             matched.design_quantity,
-            matched.unit || matched.donvi || matched.dvt // sửa đúng tên cột đơn vị của bạn nếu khác
+            matched.unit || matched.donvi || matched.dvt
           ),
           listRows: [],
         };
       }
-      const v = parseFloat(row.thiet_ke);
+      const v = parseWeekValue(row.thiet_ke);
       if (!isNaN(v) && v > 0) {
         result[group][taskKey].totalActual += v;
         result[group][taskKey].listRows.push(row);
@@ -286,7 +292,6 @@ export default function LanhDaoBan() {
                 ))}
               </tbody>
             </table>
-            {/* Cảnh báo nếu có khối lượng hợp đồng nhỏ bất thường */}
             {Object.values(groupData).some(item => item.contractQty < 1 && item.contractQty > 0) && (
               <div style={{ color: "orange", margin: "8px 0 0 8px" }}>
                 ⚠️ Phát hiện khối lượng hợp đồng nhỏ bất thường, hãy kiểm tra lại số liệu!
@@ -296,7 +301,6 @@ export default function LanhDaoBan() {
         ))}
       </div>
 
-      {/* Phần chi tiết báo cáo từng nhóm vẫn giữ nguyên */}
       {Object.entries(grouped).map(([group_code, data]) => (
         <div key={group_code} style={{ marginBottom: 28 }}>
           <h2 style={{ fontWeight: 700, fontSize: 30 }}>
