@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Tối ưu hóa so khớp tên công việc (như cũ)
+// Hàm chuẩn hóa tên công việc: mapping mọi dạng K90, K95, K98, v.v.
 function normalizeString(str) {
   if (!str) return "";
   let s = str
@@ -28,11 +28,33 @@ function parseWeekValue(val) {
   return parseFloat(val);
 }
 
-// Đọc số hợp đồng (đã chuẩn)
-function calcContractQuantity(val, unit) {
+// Đọc số hợp đồng kiểu Việt Nam, loại dấu chấm ngăn nghìn nếu cần
+function parseVnContractNumber(val) {
   if (typeof val === "number") return val;
   if (!val) return 0;
-  let num = parseFloat(val);
+  // Nếu là dạng 153.120, loại dấu chấm (=> 153120)
+  if (/^\d{1,3}(\.\d{3})+$/.test(val)) {
+    return Number(val.replace(/\./g, ""));
+  }
+  // Nếu là 153.12 nhưng thực chất phải là 153120 (nếu sau dấu . có 2 hoặc 3 số)
+  let arr = val.split(".");
+  if (arr.length === 2 && arr[1].length <= 3) {
+    return Number(arr.join(""));
+  }
+  // Nếu chỉ là số thập phân, thì parseFloat như thường
+  return Number(val);
+}
+
+// Hàm format số ra 2 chữ số sau dấu chấm, hiển thị đẹp
+function formatNumber(num) {
+  if (typeof num !== "number") num = Number(num);
+  if (isNaN(num)) return "";
+  return num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Đọc số hợp đồng tổng quát (gọi parseVnContractNumber ở trên)
+function calcContractQuantity(val, unit) {
+  let num = parseVnContractNumber(val);
   if (!unit) return num;
   let match = unit.match(/^(\d+)\s*(m3|m2|m)$/i);
   if (match) {
@@ -44,7 +66,7 @@ function calcContractQuantity(val, unit) {
   return num;
 }
 
-// So khớp công việc hợp đồng (như trước)
+// So khớp công việc hợp đồng: chỉ exact match (không fuzzy)
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
   if (!n1) return null;
@@ -52,52 +74,8 @@ function findProjectTask(subName, projectTasks) {
     const n2 = normalizeString(pt.task_name);
     return n1 === n2;
   });
-  if (found) return found;
-  let foundSoft = projectTasks.find(pt => {
-    const n2 = normalizeString(pt.task_name);
-    return n2.includes(n1) || n1.includes(n2);
-  });
-  if (foundSoft) return foundSoft;
-  let best = null, bestScore = 0.0;
-  for (let pt of projectTasks) {
-    const n2 = normalizeString(pt.task_name);
-    let score = similarity(n1, n2);
-    if (score > bestScore) {
-      bestScore = score;
-      best = pt;
-    }
-  }
-  if (best && bestScore > 0.2) return best;
-  return null;
-}
-
-function similarity(a, b) {
-  if (!a || !b) return 0;
-  if (a === b) return 1;
-  let longer = a.length > b.length ? a : b;
-  let shorter = a.length > b.length ? b : a;
-  let longerLength = longer.length;
-  if (longerLength === 0) return 1.0;
-  let editDistance = (s1, s2) => {
-    let costs = [];
-    for (let i = 0; i <= s1.length; i++) {
-      let lastValue = i;
-      for (let j = 0; j <= s2.length; j++) {
-        if (i === 0) costs[j] = j;
-        else if (j > 0) {
-          let newValue = costs[j - 1];
-          if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
-            newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-          }
-          costs[j - 1] = lastValue;
-          lastValue = newValue;
-        }
-      }
-      if (i > 0) costs[s2.length] = lastValue;
-    }
-    return costs[s2.length];
-  };
-  return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
+  // Không khớp tuyệt đối thì thôi, không lấy gần đúng
+  return found || null;
 }
 
 // Tổng hợp tiến độ cho từng tuyến/hạng mục
@@ -133,7 +111,7 @@ function getTaskProgressByGroup(weeklyReports, projectTasks) {
         item.percent = "";
       } else {
         const per = (item.totalActual / item.contractQty) * 100;
-        item.percent = per > 200 ? ">200" : per.toFixed(1);
+        item.percent = per > 200 ? ">200" : per.toFixed(2);
       }
     });
   });
@@ -266,13 +244,13 @@ export default function LanhDaoBan() {
                       {(isNaN(item.contractQty) || !item.contractQty)
                         ? ""
                         : (item.contractQty < 1
-                          ? <span style={{ color: "orange", fontWeight: 600 }}>{Math.round(item.contractQty * 100) / 100} ⚠️</span>
-                          : Math.round(item.contractQty * 100) / 100
+                          ? <span style={{ color: "orange", fontWeight: 600 }}>{formatNumber(item.contractQty)} ⚠️</span>
+                          : formatNumber(item.contractQty)
                         )
                       }
                     </td>
                     <td>
-                      {isNaN(item.totalActual) || !item.totalActual ? "" : Math.round(item.totalActual * 100) / 100}
+                      {isNaN(item.totalActual) || !item.totalActual ? "" : formatNumber(item.totalActual)}
                     </td>
                     <td>
                       {item.percent === "" ? "" :
@@ -283,11 +261,13 @@ export default function LanhDaoBan() {
                         )}
                     </td>
                     <td>
-                      {item.listRows.map(r =>
-                        <div key={r.sub_name + r.group_code}>
-                          <b>{r.group_name}:</b> {r.sub_name} ({r.thiet_ke})
-                        </div>
-                      )}
+                      {item.listRows
+                        .filter(r => normalizeString(r.sub_name) === normalizeString(item.task.task_name))
+                        .map(r =>
+                          <div key={r.sub_name + r.group_code}>
+                            <b>{r.group_name}:</b> {r.sub_name} ({formatNumber(r.thiet_ke)})
+                          </div>
+                        )}
                     </td>
                   </tr>
                 ))}
