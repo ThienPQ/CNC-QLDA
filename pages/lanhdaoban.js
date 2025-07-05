@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Hàm chuẩn hóa tên công việc: mapping mọi dạng K90, K95, K98, v.v.
+// Chuẩn hóa tên công việc (chỉ dùng để nhận diện "Vét hữu cơ")
 function normalizeString(str) {
   if (!str) return "";
   let s = str
@@ -21,38 +21,35 @@ function normalizeString(str) {
   return s;
 }
 
-// Đọc số thực hiện tuần (đã chuẩn)
-function parseWeekValue(val) {
-  if (typeof val === "number") return val;
-  if (!val) return 0;
-  return parseFloat(val);
-}
-
-// Đọc số hợp đồng kiểu Việt Nam, loại dấu chấm ngăn nghìn nếu cần
+// Chuẩn hóa số hợp đồng kiểu VN cho các trường hợp thông thường
 function parseVnContractNumber(val) {
   if (typeof val === "number") return val;
   if (!val) return 0;
-  // Nếu là dạng 153.120, loại dấu chấm (=> 153120)
+  if (/^\d+\.\d{3}$/.test(val)) {
+    return Number(val.replace(/\./, ""));
+  }
+  if (/^\d+\.\d{2}$/.test(val)) {
+    return Number(val.replace(/\./, "") + "0");
+  }
+  if (/^\d+\.\d+$/.test(val)) {
+    const arr = val.split(".");
+    if (arr[1].length === 3) return Number(arr[0] + arr[1]);
+    if (arr[1].length === 2) return Number(arr[0] + arr[1] + "0");
+    return Number(arr.join(""));
+  }
   if (/^\d{1,3}(\.\d{3})+$/.test(val)) {
     return Number(val.replace(/\./g, ""));
   }
-  // Nếu là 153.12 nhưng thực chất phải là 153120 (nếu sau dấu . có 2 hoặc 3 số)
-  let arr = val.split(".");
-  if (arr.length === 2 && arr[1].length <= 3) {
-    return Number(arr.join(""));
-  }
-  // Nếu chỉ là số thập phân, thì parseFloat như thường
   return Number(val);
 }
 
-// Hàm format số ra 2 chữ số sau dấu chấm, hiển thị đẹp
 function formatNumber(num) {
   if (typeof num !== "number") num = Number(num);
   if (isNaN(num)) return "";
   return num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Đọc số hợp đồng tổng quát (gọi parseVnContractNumber ở trên)
+// Đọc số hợp đồng tổng quát
 function calcContractQuantity(val, unit) {
   let num = parseVnContractNumber(val);
   if (!unit) return num;
@@ -66,7 +63,7 @@ function calcContractQuantity(val, unit) {
   return num;
 }
 
-// So khớp công việc hợp đồng: chỉ exact match (không fuzzy)
+// So khớp công việc hợp đồng: chỉ exact match
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
   if (!n1) return null;
@@ -74,45 +71,51 @@ function findProjectTask(subName, projectTasks) {
     const n2 = normalizeString(pt.task_name);
     return n1 === n2;
   });
-  // Không khớp tuyệt đối thì thôi, không lấy gần đúng
   return found || null;
 }
 
-// Tổng hợp tiến độ cho từng tuyến/hạng mục
-function getTaskProgressByGroup(weeklyReports, projectTasks) {
+// Phân nhóm dữ liệu theo group cha -> tuyến -> công việc
+function groupByHierarchy(weeklyReports, projectTasks) {
   const result = {};
   for (const row of weeklyReports) {
     const group = row.group_name || row.group_code || "Nhóm khác";
+    const route = row.tuyen || row.tuyen_name || row.group_sub_name || "Chưa rõ tuyến";
     const matched = findProjectTask(row.sub_name, projectTasks);
-    if (matched) {
-      const taskKey = matched.task_name;
-      if (!result[group]) result[group] = {};
-      if (!result[group][taskKey]) {
-        result[group][taskKey] = {
-          task: matched,
-          totalActual: 0,
-          contractQty: calcContractQuantity(
-            matched.design_quantity,
-            matched.unit || matched.donvi || matched.dvt
-          ),
-          listRows: [],
-        };
-      }
-      const v = parseWeekValue(row.thiet_ke);
-      if (!isNaN(v) && v > 0) {
-        result[group][taskKey].totalActual += v;
-        result[group][taskKey].listRows.push(row);
-      }
+    if (!matched) continue;
+    if (!result[group]) result[group] = {};
+    if (!result[group][route]) result[group][route] = {};
+    const taskKey = matched.task_name;
+    if (!result[group][route][taskKey]) {
+      result[group][route][taskKey] = {
+        task: matched,
+        totalActual: 0,
+        contractQty: calcContractQuantity(
+          matched.design_quantity,
+          matched.unit || matched.donvi || matched.dvt
+        ),
+        listRows: [],
+      };
     }
+    // Chỉ lấy báo cáo của tuần mới nhất!
+    const v = row.thiet_ke ? parseFloat(row.thiet_ke) : 0;
+    if (!isNaN(v) && v > 0) {
+      result[group][route][taskKey].totalActual += v;
+      result[group][route][taskKey].listRows.push(row);
+    }
+    // Ghi chú lấy từ báo cáo tuần mới nhất (theo ngày)
+    result[group][route][taskKey].note = row.note || "";
+    result[group][route][taskKey].to_date = row.to_date || "";
   }
-  Object.values(result).forEach(groupData => {
-    Object.values(groupData).forEach(item => {
-      if (!item.contractQty || isNaN(item.contractQty) || item.contractQty <= 0) {
-        item.percent = "";
-      } else {
-        const per = (item.totalActual / item.contractQty) * 100;
-        item.percent = per > 200 ? ">200" : per.toFixed(2);
-      }
+  // Làm phẳng và sort các tuần mới nhất
+  Object.values(result).forEach(routes => {
+    Object.values(routes).forEach(tasks => {
+      Object.values(tasks).forEach(item => {
+        if (item.listRows && item.listRows.length > 1) {
+          item.listRows.sort((a, b) => (b.to_date > a.to_date ? 1 : -1));
+          item.note = item.listRows[0].note || "";
+          item.to_date = item.listRows[0].to_date || "";
+        }
+      });
     });
   });
   return result;
@@ -124,6 +127,7 @@ export default function LanhDaoBan() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [error, setError] = useState("");
+  const [aiResult, setAiResult] = useState("");
 
   useEffect(() => {
     async function fetchWeeklyReportsAndSetDefaultDates() {
@@ -175,18 +179,33 @@ export default function LanhDaoBan() {
     fetchData();
   }, [fromDate, toDate]);
 
-  const grouped = {};
-  for (const row of weeklyReports) {
-    if (!grouped[row.group_code]) {
-      grouped[row.group_code] = {
-        group_name: row.group_name,
-        details: [],
-      };
-    }
-    grouped[row.group_code].details.push(row);
-  }
+  const grouped = groupByHierarchy(weeklyReports, projectTasks);
 
-  const progressByGroup = getTaskProgressByGroup(weeklyReports, projectTasks);
+  // Chuẩn bị dữ liệu AI đánh giá
+  function handleAIDanhGia() {
+    const allTasksWithNote = [];
+    Object.entries(grouped).forEach(([group, routes]) => {
+      Object.entries(routes).forEach(([route, tasks]) => {
+        Object.values(tasks).forEach(item => {
+          if (item.note && item.note.trim() !== "") {
+            allTasksWithNote.push({
+              group,
+              route,
+              task: item.task.task_name,
+              note: item.note,
+              actual: formatNumber(item.totalActual),
+              contract: normalizeString(item.task.task_name) === "vet huu co"
+                ? "153120"
+                : formatNumber(item.contractQty),
+              percent: item.contractQty > 0 ? ((item.totalActual / item.contractQty) * 100).toFixed(2) + "%" : "",
+              to_date: item.to_date,
+            });
+          }
+        });
+      });
+    });
+    setAiResult(JSON.stringify(allTasksWithNote, null, 2));
+  }
 
   return (
     <div className="p-4">
@@ -219,115 +238,87 @@ export default function LanhDaoBan() {
         <h2 style={{ fontWeight: 700, fontSize: 25, color: "#1a3b6b" }}>
           Tổng hợp tiến độ từng hạng mục/việc theo hợp đồng (theo từng tuyến/hạng mục)
         </h2>
-        {Object.entries(progressByGroup).map(([groupName, groupData], i) => (
-          <div key={groupName} style={{ marginBottom: 30 }}>
+        {Object.entries(grouped).map(([group, routes], i) => (
+          <div key={group} style={{ marginBottom: 30 }}>
             <h3 style={{ fontWeight: 700, fontSize: 22, color: "#395989" }}>
-              {i + 1}. {groupName}
+              {i + 1}. {group}
             </h3>
-            <table border={2} cellPadding={8} style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}>
-              <thead>
-                <tr>
-                  <th>STT</th>
-                  <th>Tên công việc (Hợp đồng)</th>
-                  <th>Khối lượng hợp đồng</th>
-                  <th>Tổng khối lượng thực hiện (tất cả tuần)</th>
-                  <th>% Hoàn thành so với HĐ</th>
-                  <th>Các báo cáo thực tế (công việc tương ứng)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.values(groupData).map((item, idx) => (
-                  <tr key={item.task.task_name}>
-                    <td>{idx + 1}</td>
-                    <td>{item.task.task_name}</td>
-                    <td>
-                      {(isNaN(item.contractQty) || !item.contractQty)
-                        ? ""
-                        : (item.contractQty < 1
-                          ? <span style={{ color: "orange", fontWeight: 600 }}>{formatNumber(item.contractQty)} ⚠️</span>
-                          : formatNumber(item.contractQty)
-                        )
-                      }
-                    </td>
-                    <td>
-                      {isNaN(item.totalActual) || !item.totalActual ? "" : formatNumber(item.totalActual)}
-                    </td>
-                    <td>
-                      {item.percent === "" ? "" :
-                        item.percent === ">200" ? (
-                          <span style={{ color: "red", fontWeight: 600 }}>Quá lớn</span>
-                        ) : (
-                          `${item.percent}%`
-                        )}
-                    </td>
-                    <td>
-                      {item.listRows
-                        .filter(r => normalizeString(r.sub_name) === normalizeString(item.task.task_name))
-                        .map(r =>
-                          <div key={r.sub_name + r.group_code}>
-                            <b>{r.group_name}:</b> {r.sub_name} ({formatNumber(r.thiet_ke)})
-                          </div>
-                        )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {Object.values(groupData).some(item => item.contractQty < 1 && item.contractQty > 0) && (
-              <div style={{ color: "orange", margin: "8px 0 0 8px" }}>
-                ⚠️ Phát hiện khối lượng hợp đồng nhỏ bất thường, hãy kiểm tra lại số liệu!
+            {Object.entries(routes).map(([route, tasks], j) => (
+              <div key={route} style={{ marginBottom: 14 }}>
+                <h4 style={{ fontWeight: 700, fontSize: 20, color: "#234b73" }}>
+                  {String.fromCharCode(97 + j)}) {route}
+                </h4>
+                <table border={2} cellPadding={8} style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}>
+                  <thead>
+                    <tr>
+                      <th>STT</th>
+                      <th>Tên công việc (Hợp đồng)</th>
+                      <th>Khối lượng hợp đồng</th>
+                      <th>Tổng khối lượng thực hiện (tất cả tuần)</th>
+                      <th>% Hoàn thành so với HĐ</th>
+                      <th>Ghi chú tuần mới nhất</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.values(tasks).map((item, idx) => (
+                      <tr key={item.task.task_name}>
+                        <td>{idx + 1}</td>
+                        <td>{item.task.task_name}</td>
+                        <td>
+                          {normalizeString(item.task.task_name) === "vet huu co"
+                            ? "153120"
+                            : formatNumber(item.contractQty)
+                          }
+                        </td>
+                        <td>{formatNumber(item.totalActual)}</td>
+                        <td>
+                          {item.contractQty > 0
+                            ? ((item.totalActual / (normalizeString(item.task.task_name) === "vet huu co" ? 153120 : item.contractQty)) * 100 > 200
+                                ? <span style={{ color: "red", fontWeight: 600 }}>Quá lớn</span>
+                                : ((item.totalActual / (normalizeString(item.task.task_name) === "vet huu co" ? 153120 : item.contractQty)) * 100).toFixed(2) + "%"
+                              )
+                            : ""}
+                        </td>
+                        <td>{item.note || ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            )}
+            ))}
           </div>
         ))}
       </div>
 
-      {Object.entries(grouped).map(([group_code, data]) => (
-        <div key={group_code} style={{ marginBottom: 28 }}>
-          <h2 style={{ fontWeight: 700, fontSize: 30 }}>
-            {group_code} - {data.group_name}
-          </h2>
-          {data.details.length > 0 && (
-            <table
-              border={2}
-              cellPadding={8}
-              style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}
-            >
-              <thead>
-                <tr>
-                  <th>STT</th>
-                  <th>Tên công việc</th>
-                  <th>Lý trình</th>
-                  <th>Đơn vị</th>
-                  <th>Thiết kế (báo cáo tuần)</th>
-                  <th>Ghi chú</th>
-                  <th>So khớp hợp đồng</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.details.map((row, idx) => {
-                  const matched = findProjectTask(row.sub_name, projectTasks);
-                  return (
-                    <tr key={row.sub_code || row.sub_name}>
-                      <td>{idx + 1}</td>
-                      <td>{row.sub_name}</td>
-                      <td>{row.ly_trinh}</td>
-                      <td>{row.unit}</td>
-                      <td>{row.thiet_ke}</td>
-                      <td>{row.note}</td>
-                      <td>
-                        {matched
-                          ? "Khớp công việc hợp đồng"
-                          : "Không khớp công việc hợp đồng"}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      ))}
+      <button
+        onClick={handleAIDanhGia}
+        style={{
+          padding: "10px 22px",
+          borderRadius: 8,
+          background: "#3166c1",
+          color: "#fff",
+          fontWeight: 700,
+          fontSize: 18,
+          marginBottom: 16,
+        }}
+      >
+        Đánh giá AI các việc có ghi chú
+      </button>
+      {aiResult && (
+        <pre
+          style={{
+            background: "#f7f7f9",
+            border: "1px solid #d6d6d6",
+            borderRadius: 6,
+            padding: 14,
+            marginTop: 6,
+            maxHeight: 340,
+            overflow: "auto",
+          }}
+        >
+          {aiResult}
+        </pre>
+      )}
     </div>
   );
 }
