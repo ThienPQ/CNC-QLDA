@@ -1,68 +1,20 @@
 import { useEffect, useState, useMemo } from "react";
-import Head from "next/head";
 import axios from "axios";
+import Head from "next/head";
 
-// --- Chuẩn hóa tên công việc để nhận diện "Vét hữu cơ"
-function normalizeString(str) {
-  if (!str) return "";
-  let s = str
-    .replace(/đắp đất nền đường, độ chặt yêu cầu k[= ]*0[.,]?90/gi, "đắp nền k90")
-    .replace(/đắp đất nền đường, độ chặt yêu cầu k[= ]*0[.,]?95/gi, "đắp nền k95")
-    .replace(/đắp đất nền đường, độ chặt yêu cầu k[= ]*0[.,]?98/gi, "đắp nền k98")
-    .replace(/đắp đất nền đường/gi, "đắp nền")
-    .replace(/độ chặt yêu cầu/gi, "")
-    .replace(/đắp đất/gi, "đắp nền")
-    .replace(/[\n\r\t"';,]+/g, " ")
-    .replace(/K[= :]*0[.,]?90?\b/gi, "K90")
-    .replace(/K[= :]*0[.,]?95\b/gi, "K95")
-    .replace(/K[= :]*0[.,]?98\b/gi, "K98");
-  s = s.replace(/[^a-zA-Z0-9 ]/g, " ");
-  s = s.toLowerCase().replace(/\s+/g, " ").trim();
-  return s;
-}
-
-function parseVnContractNumber(val) {
-  if (typeof val === "number") return val;
-  if (!val) return 0;
-  if (/^\d+\.\d{3}$/.test(val)) return Number(val.replace(/\./, ""));
-  if (/^\d+\.\d{2}$/.test(val)) return Number(val.replace(/\./, "") + "0");
-  if (/^\d+\.\d+$/.test(val)) {
-    const arr = val.split(".");
-    if (arr[1].length === 3) return Number(arr[0] + arr[1]);
-    if (arr[1].length === 2) return Number(arr[0] + arr[1] + "0");
-    return Number(arr.join(""));
+// Helper: Ghép khối lượng hợp đồng từ projectTasks theo task_name (hoặc sub_name)
+function getContractQuantity(taskName, projectTasks) {
+  if (!taskName) return "";
+  const matched = projectTasks.find(t =>
+    (t.task_name || "").trim().toLowerCase() === taskName.trim().toLowerCase()
+  );
+  if (!matched) return "";
+  // Nếu design_quantity là số kiểu "1.000" => ép kiểu giữ số 1000
+  let qty = matched.design_quantity || "";
+  if (typeof qty === "string" && /^\d+\.\d{3}$/.test(qty)) {
+    qty = qty.replace(/\./g, "");
   }
-  if (/^\d{1,3}(\.\d{3})+$/.test(val)) return Number(val.replace(/\./g, ""));
-  return Number(val);
-}
-
-function formatNumber(num) {
-  if (typeof num !== "number") num = Number(num);
-  if (isNaN(num)) return "";
-  return num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function findProjectTask(subName, projectTasks) {
-  const n1 = normalizeString(subName);
-  if (!n1) return null;
-  let found = projectTasks.find(pt => {
-    const n2 = normalizeString(pt.task_name);
-    return n1 === n2;
-  });
-  return found || null;
-}
-
-function calcContractQuantity(val, unit) {
-  let num = parseVnContractNumber(val);
-  if (!unit) return num;
-  let match = unit.match(/^(\d+)\s*(m3|m2|m)$/i);
-  if (match) {
-    let factor = Number(match[1]);
-    if (!isNaN(factor)) {
-      return num * factor;
-    }
-  }
-  return num;
+  return qty;
 }
 
 export default function LanhDaoBan() {
@@ -71,255 +23,153 @@ export default function LanhDaoBan() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [error, setError] = useState("");
-  const [aiText, setAiText] = useState("");
 
   useEffect(() => {
-    async function fetchWeeklyReportsAndSetDefaultDates() {
+    async function fetchData() {
       try {
-        const res = await axios.get("/api/get-weekly-reports");
-        const data = res.data || [];
-        setWeeklyReports(data);
-        if (data.length > 0) {
-          let maxToDate = data[0].to_date;
-          data.forEach(row => {
+        const reports = (await axios.get("/api/get-weekly-reports")).data || [];
+        const tasks = (await axios.get("/api/get-project-tasks")).data || [];
+        setWeeklyReports(reports);
+        setProjectTasks(tasks);
+        if (reports.length > 0) {
+          let maxToDate = reports[0].to_date;
+          reports.forEach(row => {
             if (row.to_date && row.to_date > maxToDate) maxToDate = row.to_date;
           });
-          let minFromDate = data.find(row => row.to_date === maxToDate)?.from_date || data[0].from_date;
+          let minFromDate = reports.find(row => row.to_date === maxToDate)?.from_date || reports[0].from_date;
           setFromDate(minFromDate);
           setToDate(maxToDate);
         }
-        setError("");
       } catch (err) {
-        setError("Không thể tải dữ liệu báo cáo");
-        setWeeklyReports([]);
-      }
-    }
-    async function fetchProjectTasks() {
-      try {
-        const res = await axios.get("/api/get-project-tasks");
-        setProjectTasks(res.data || []);
-      } catch (err) {
-        setProjectTasks([]);
-      }
-    }
-    fetchWeeklyReportsAndSetDefaultDates();
-    fetchProjectTasks();
-  }, []);
-
-  useEffect(() => {
-    if (!fromDate || !toDate) return;
-    async function fetchData() {
-      try {
-        const res = await axios.get("/api/get-weekly-reports", {
-          params: { fromDate, toDate },
-        });
-        setWeeklyReports(res.data || []);
-        setError("");
-      } catch (err) {
-        setError("Không thể tải dữ liệu báo cáo");
-        setWeeklyReports([]);
+        setError("Không thể tải dữ liệu.");
       }
     }
     fetchData();
-  }, [fromDate, toDate]);
+  }, []);
 
-  // PHÂN NHÓM CHUẨN VIỆT NAM: chỉ lấy tuyến là số, không a), không "chưa rõ tuyến"
-  const groupCodes = useMemo(() => [...new Set(weeklyReports.map(row => row.group_code).filter(Boolean))], [weeklyReports]);
-  const groupNames = useMemo(() => {
-    const names = {};
-    weeklyReports.forEach(row => {
-      if (row.group_code) names[row.group_code] = row.group_name || names[row.group_code] || "";
-    });
-    return names;
-  }, [weeklyReports]);
-  // Gom tuyến dạng số
-  const groupedData = useMemo(() => {
-    const data = {};
+  // --- Xử lý dữ liệu cộng dồn tổng thực hiện ---
+  const dataTree = useMemo(() => {
+    // Gom theo group_code -> route -> task_name
+    const tree = {};
+    // Để cộng dồn từng công việc/tuyến
+    const allSum = {};
+
     weeklyReports.forEach(row => {
       const group_code = row.group_code || "";
-      if (!group_code) return;
-      let route = (row.group_sub_code || row.tuyen || row.tuyen_name || row.route || "").toString().trim();
-      if (!/^\d+$/.test(route)) return; // Chỉ lấy tuyến là số nguyên dương
-      if (!data[group_code]) data[group_code] = {};
-      if (!data[group_code][route]) data[group_code][route] = [];
-      // Chuẩn hóa số liệu hiển thị
-      // Map đúng công việc từ hợp đồng nếu có
-      const matched = findProjectTask(row.sub_name, projectTasks);
-      let contractQty = "";
-      if (matched) {
-        contractQty = normalizeString(matched.task_name) === "vet huu co"
-          ? "153120"
-          : formatNumber(calcContractQuantity(matched.design_quantity, matched.unit || matched.donvi || matched.dvt));
+      const group_name = row.group_name || "";
+      const route = (row.group_sub_code || row.tuyen || row.route || "").toString().trim();
+      const taskName = row.sub_name || row.task_name || "";
+
+      if (!group_code || !route || !taskName) return;
+      // Tạo key gom nhóm
+      const key = [group_code, route, taskName].join("||");
+      if (!allSum[key]) allSum[key] = { sum: 0, notes: [], lastNote: "", lastDate: "" };
+
+      // Thiet_ke là số thực hiện tuần này
+      let thk = Number(row.thiet_ke || 0);
+      if (!isNaN(thk)) {
+        allSum[key].sum += thk;
       }
-      data[group_code][route].push({
-        ...row,
-        contractQty,
-        totalActual: formatNumber(row.thiet_ke ? parseFloat(row.thiet_ke) : 0),
-        percent: contractQty && parseFloat(contractQty) > 0 && row.thiet_ke
-          ? ((parseFloat(row.thiet_ke) / parseFloat(contractQty)) * 100 > 200
-              ? "Quá lớn"
-              : ((parseFloat(row.thiet_ke) / parseFloat(contractQty)) * 100).toFixed(2) + "%")
-          : "",
-      });
-    });
-    return data;
-  }, [weeklyReports, projectTasks]);
-
-  // Đánh giá AI
-  function handleAIDanhGia() {
-    // Gom báo cáo cùng nhóm, tuyến, công việc
-    const allWorks = {};
-    weeklyReports.forEach(row => {
-      const matched = findProjectTask(row.sub_name, projectTasks);
-      if (!matched) return;
-      let group_code = row.group_code || "";
-      let route = (row.group_sub_code || row.tuyen || row.tuyen_name || row.route || "").toString().trim();
-      if (!/^\d+$/.test(route)) return;
-      const taskKey = [group_code, route, normalizeString(matched.task_name)].join("|");
-      if (!allWorks[taskKey]) allWorks[taskKey] = [];
-      allWorks[taskKey].push({
-        group_code,
-        group_name: row.group_name,
-        route,
-        task_name: matched.task_name,
-        date: row.to_date,
-        actual: row.thiet_ke ? parseFloat(row.thiet_ke) : 0,
-        note: row.note === "nan" ? "" : row.note,
-      });
-    });
-    // Sort tuần mới nhất lên đầu
-    Object.values(allWorks).forEach(list => list.sort((a, b) => (b.date < a.date ? 1 : -1)));
-
-    let out = [];
-    Object.values(allWorks).forEach(list => {
-      if (list.length === 0) return;
-      const cur = list[0];
-      const prev = list[1];
-      if (cur.note && cur.note.trim() !== "") {
-        let chenhLech = "";
-        if (prev) {
-          if (cur.actual > prev.actual) chenhLech = `Khối lượng tuần này tăng so với tuần trước (${formatNumber(prev.actual)} ➔ ${formatNumber(cur.actual)}). `;
-          else if (cur.actual < prev.actual) chenhLech = `Khối lượng tuần này giảm so với tuần trước (${formatNumber(prev.actual)} ➔ ${formatNumber(cur.actual)}). `;
-          else chenhLech = `Khối lượng tuần này không đổi so với tuần trước (${formatNumber(cur.actual)}). `;
-        } else {
-          chenhLech = `Không có số liệu tuần trước để so sánh. `;
+      // Ghi chú tuần mới nhất theo ngày
+      if (row.note && row.note !== "nan") {
+        if (!allSum[key].lastDate || row.to_date > allSum[key].lastDate) {
+          allSum[key].lastDate = row.to_date;
+          allSum[key].lastNote = row.note;
         }
-        let xuLy = "";
-        const ghiChu = cur.note.toLowerCase();
-        if (ghiChu.includes("mưa")) xuLy = "Chỉ đạo: Chủ động máy bơm, che chắn, điều chỉnh tiến độ khi trời mưa.";
-        else if (ghiChu.includes("thiếu vật liệu")) xuLy = "Chỉ đạo: Bổ sung vật liệu ngay, tránh ảnh hưởng tiến độ.";
-        else if (ghiChu.includes("thiếu nhân lực")) xuLy = "Chỉ đạo: Bổ sung nhân lực, chia ca hợp lý.";
-        else if (ghiChu.includes("mặt bằng") || ghiChu.includes("giải phóng mặt bằng")) xuLy = "Chỉ đạo: Đề nghị địa phương đẩy nhanh giải phóng mặt bằng.";
-        else xuLy = "Chỉ đạo: Theo dõi, đề xuất biện pháp khắc phục phù hợp.";
-        out.push(
-          `- [${cur.group_name || cur.group_code || ""}] Tuyến ${cur.route}, ${cur.task_name}: ${chenhLech}Ghi chú: "${cur.note}". ${xuLy}`
-        );
       }
+
+      // Nhóm vào cây hiển thị
+      if (!tree[group_code]) tree[group_code] = { group_name, routes: {} };
+      if (!tree[group_code].routes[route]) tree[group_code].routes[route] = {};
+      if (!tree[group_code].routes[route][taskName]) tree[group_code].routes[route][taskName] = [];
+      tree[group_code].routes[route][taskName].push(row);
     });
-    if (out.length === 0) setAiText("Không có công việc nào có ghi chú để đánh giá.");
-    else setAiText(out.join("\n\n"));
-  }
+
+    // Bổ sung trường sum thực hiện, hợp đồng, % hoàn thành, ghi chú tuần mới nhất vào từng task
+    Object.keys(tree).forEach(group_code => {
+      Object.keys(tree[group_code].routes).forEach(route => {
+        Object.keys(tree[group_code].routes[route]).forEach(taskName => {
+          const contractQty = getContractQuantity(taskName, projectTasks);
+          const sumThk = allSum[[group_code, route, taskName].join("||")].sum;
+          const note = allSum[[group_code, route, taskName].join("||")].lastNote;
+          // Chỉ lấy 1 dòng duy nhất cho 1 task để hiển thị gọn bảng
+          tree[group_code].routes[route][taskName] = [{
+            taskName,
+            contractQty,
+            sumThk,
+            percent: contractQty && Number(contractQty) > 0 ? ((sumThk/Number(contractQty))*100).toFixed(2)+"%" : "",
+            note: note || ""
+          }];
+        });
+      });
+    });
+    return tree;
+  }, [weeklyReports, projectTasks]);
 
   return (
     <div className="p-4">
       <Head>
-        <title>Báo cáo tuần và đánh giá</title>
+        <title>Báo cáo tuần và tổng hợp</title>
       </Head>
-      <h1 style={{ fontWeight: 800, fontSize: 40 }}>Báo cáo tuần và đánh giá</h1>
-      <div style={{ marginBottom: 12 }}>
+      <h1 style={{fontWeight:800, fontSize:40}}>BÁO CÁO TUẦN - SO SÁNH KHỐI LƯỢNG HỢP ĐỒNG</h1>
+      <div style={{marginBottom:12}}>
         <span>Từ ngày: </span>
-        <input
-          type="date"
-          value={fromDate}
-          onChange={(e) => setFromDate(e.target.value)}
-        />
-        <span style={{ marginLeft: 16 }}>Đến ngày: </span>
-        <input
-          type="date"
-          value={toDate}
-          onChange={(e) => setToDate(e.target.value)}
-        />
+        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+        <span style={{marginLeft:16}}>Đến ngày: </span>
+        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
       </div>
-      {error && (
-        <div style={{ color: "red", fontWeight: 600 }}>{error}</div>
-      )}
+      {error && <div style={{color:"red", fontWeight:600}}>{error}</div>}
       {!error && weeklyReports.length === 0 && (
         <div>Không có dữ liệu báo cáo.</div>
       )}
 
-      <div style={{ margin: "30px 0 40px 0" }}>
-        <h2 style={{ fontWeight: 700, fontSize: 25, color: "#1a3b6b" }}>
-          Tổng hợp tiến độ từng hạng mục/việc theo hợp đồng (theo từng tuyến/hạng mục)
-        </h2>
-        {groupCodes.map((group_code, i) => (
-          <div key={group_code} style={{ marginBottom: 30 }}>
-            <h3 style={{ fontWeight: 700, fontSize: 32, color: "#395989" }}>
-              {String.fromCharCode(73 + i)}. {groupNames[group_code] || group_code}
-            </h3>
-            {Object.keys(groupedData[group_code] || {}).sort((a,b)=>Number(a)-Number(b)).map((route, idx) => (
-              <div key={route} style={{ marginBottom: 14 }}>
-                <h4 style={{ fontWeight: 700, fontSize: 24, color: "#234b73" }}>
-                  {idx + 1}. Tuyến {route}
-                </h4>
-                <table border={2} cellPadding={8} style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}>
-                  <thead>
-                    <tr>
-                      <th>STT</th>
-                      <th>Tên công việc (Hợp đồng)</th>
-                      <th>Khối lượng hợp đồng</th>
-                      <th>Tổng khối lượng thực hiện (tất cả tuần)</th>
-                      <th>% Hoàn thành so với HĐ</th>
-                      <th>Ghi chú tuần mới nhất</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {groupedData[group_code][route].map((item, tIdx) => (
-                      <tr key={tIdx}>
-                        <td>{tIdx + 1}</td>
-                        <td>{item.sub_name || item.task_name}</td>
-                        <td>{item.contractQty}</td>
-                        <td>{item.totalActual}</td>
-                        <td>{item.percent}</td>
-                        <td>{item.note && item.note !== "nan" ? item.note : ""}</td>
+      <div style={{margin:"30px 0 40px 0"}}>
+        {Object.keys(dataTree).map((group_code, idx) => {
+          const group = dataTree[group_code];
+          const routes = group.routes;
+          return (
+            <div key={group_code} style={{marginBottom:40}}>
+              <h2 style={{fontSize:32, fontWeight:700, color:"#143565", margin:"36px 0 14px 0"}}>
+                {String.fromCharCode(73+idx)}. {group.group_name}
+              </h2>
+              {Object.keys(routes).sort((a,b)=>Number(a)-Number(b)).map((route, ridx) => (
+                <div key={route} style={{marginBottom:24}}>
+                  <h3 style={{fontSize:24, color:"#2451a6", fontWeight:700}}>
+                    {ridx+1}. Tuyến {route}
+                  </h3>
+                  <table border={2} cellPadding={8} style={{minWidth:900, background:"#fff"}}>
+                    <thead>
+                      <tr>
+                        <th>STT</th>
+                        <th>Công việc</th>
+                        <th>Khối lượng HĐ</th>
+                        <th>Tổng thực hiện (tất cả tuần)</th>
+                        <th>% Hoàn thành</th>
+                        <th>Ghi chú tuần mới nhất</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-          </div>
-        ))}
+                    </thead>
+                    <tbody>
+                      {Object.keys(routes[route]).map((taskName, tIdx) => {
+                        const item = routes[route][taskName][0];
+                        return (
+                          <tr key={tIdx}>
+                            <td>{tIdx+1}</td>
+                            <td>{item.taskName}</td>
+                            <td>{item.contractQty}</td>
+                            <td>{item.sumThk}</td>
+                            <td>{item.percent}</td>
+                            <td>{item.note}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          );
+        })}
       </div>
-
-      <button
-        onClick={handleAIDanhGia}
-        style={{
-          padding: "10px 22px",
-          borderRadius: 8,
-          background: "#3166c1",
-          color: "#fff",
-          fontWeight: 700,
-          fontSize: 18,
-          marginBottom: 16,
-        }}
-      >
-        Đánh giá AI các việc có ghi chú
-      </button>
-      {aiText && (
-        <div style={{
-          background: "#fafafd",
-          padding: 18,
-          borderRadius: 7,
-          border: "1px solid #e1e1e8",
-          marginBottom: 30,
-          whiteSpace: "pre-line",
-          fontSize: 17,
-          color: "#174580"
-        }}>
-          <h3 style={{ color: "#285ea6", marginTop: 0, fontWeight: 700 }}>Đánh giá AI các công việc có ghi chú</h3>
-          {aiText}
-        </div>
-      )}
     </div>
   );
 }
