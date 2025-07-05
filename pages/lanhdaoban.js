@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Hàm normalize mạnh nhất, loại bỏ mọi ký tự lạ và chuẩn hóa triệt để các mã K90, K95, K98
+// Chuẩn hóa tên công việc
 function normalizeString(str) {
   if (!str) return "";
   let s = str
@@ -18,10 +18,12 @@ function normalizeString(str) {
   return s;
 }
 
-// Chuẩn hóa khối lượng hợp đồng cho các đơn vị đặc biệt (100m3, 100m2, 100m...)
+// CHUẨN HÓA SỐ KHỐI LƯỢNG HỢP ĐỒNG (loại . và ,)
 function calcContractQuantity(design_quantity, unit) {
-  if (!design_quantity || isNaN(Number(design_quantity))) return 0;
-  let num = Number(design_quantity);
+  if (!design_quantity) return 0;
+  // Loại bỏ mọi dấu . và , để không bị mất số không!
+  let numStr = String(design_quantity).replace(/[.,]/g, "");
+  let num = Number(numStr);
   if (!unit) return num;
 
   // Tìm xem unit có dạng "100m3", "100m2", "100m"
@@ -32,11 +34,10 @@ function calcContractQuantity(design_quantity, unit) {
       return num * factor;
     }
   }
-  // Đơn vị dạng "m3", "m2", "m", ... giữ nguyên
   return num;
 }
 
-// So khớp công việc hợp đồng chỉ dùng normalize
+// So khớp công việc hợp đồng
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
   if (!n1) return null;
@@ -45,13 +46,11 @@ function findProjectTask(subName, projectTasks) {
     return n1 === n2;
   });
   if (found) return found;
-  // Ghép mềm nếu cần
   let foundSoft = projectTasks.find(pt => {
     const n2 = normalizeString(pt.task_name);
     return n2.includes(n1) || n1.includes(n2);
   });
   if (foundSoft) return foundSoft;
-  // Similarity
   let best = null, bestScore = 0.0;
   for (let pt of projectTasks) {
     const n2 = normalizeString(pt.task_name);
@@ -96,7 +95,6 @@ function similarity(a, b) {
 
 // Tổng hợp tiến độ cho từng tuyến/hạng mục riêng biệt
 function getTaskProgressByGroup(weeklyReports, projectTasks) {
-  // result[group_code][task_name] = {...}
   const result = {};
   for (const row of weeklyReports) {
     const group = row.group_name || row.group_code || "Nhóm khác";
@@ -105,13 +103,12 @@ function getTaskProgressByGroup(weeklyReports, projectTasks) {
       const taskKey = matched.task_name;
       if (!result[group]) result[group] = {};
       if (!result[group][taskKey]) {
-        // Lưu ý: trường đơn vị của matched có thể là unit, donvi, dvt... sửa cho đúng
         result[group][taskKey] = {
           task: matched,
           totalActual: 0,
           contractQty: calcContractQuantity(
             matched.design_quantity,
-            matched.unit || matched.donvi || matched.dvt // <-- sửa cho đúng tên cột đơn vị của bạn
+            matched.unit || matched.donvi || matched.dvt // sửa đúng tên cột đơn vị của bạn nếu khác
           ),
           listRows: [],
         };
@@ -193,7 +190,6 @@ export default function LanhDaoBan() {
     fetchData();
   }, [fromDate, toDate]);
 
-  // Gom nhóm theo group_code
   const grouped = {};
   for (const row of weeklyReports) {
     if (!grouped[row.group_code]) {
@@ -205,7 +201,6 @@ export default function LanhDaoBan() {
     grouped[row.group_code].details.push(row);
   }
 
-  // Tiến độ từng nhóm/hạng mục
   const progressByGroup = getTaskProgressByGroup(weeklyReports, projectTasks);
 
   return (
