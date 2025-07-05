@@ -18,6 +18,24 @@ function normalizeString(str) {
   return s;
 }
 
+// Chuẩn hóa khối lượng hợp đồng cho các đơn vị đặc biệt (100m3, 100m2, 100m...)
+function calcContractQuantity(design_quantity, unit) {
+  if (!design_quantity || isNaN(Number(design_quantity))) return 0;
+  let num = Number(design_quantity);
+  if (!unit) return num;
+
+  // Tìm xem unit có dạng "100m3", "100m2", "100m"
+  let match = unit.match(/^(\d+)\s*(m3|m2|m)$/i);
+  if (match) {
+    let factor = Number(match[1]);
+    if (!isNaN(factor)) {
+      return num * factor;
+    }
+  }
+  // Đơn vị dạng "m3", "m2", "m", ... giữ nguyên
+  return num;
+}
+
 // So khớp công việc hợp đồng chỉ dùng normalize
 function findProjectTask(subName, projectTasks) {
   const n1 = normalizeString(subName);
@@ -87,10 +105,14 @@ function getTaskProgressByGroup(weeklyReports, projectTasks) {
       const taskKey = matched.task_name;
       if (!result[group]) result[group] = {};
       if (!result[group][taskKey]) {
+        // Lưu ý: trường đơn vị của matched có thể là unit, donvi, dvt... sửa cho đúng
         result[group][taskKey] = {
           task: matched,
           totalActual: 0,
-          contractQty: parseFloat(matched.design_quantity || 0),
+          contractQty: calcContractQuantity(
+            matched.design_quantity,
+            matched.unit || matched.donvi || matched.dvt // <-- sửa cho đúng tên cột đơn vị của bạn
+          ),
           listRows: [],
         };
       }
@@ -101,7 +123,6 @@ function getTaskProgressByGroup(weeklyReports, projectTasks) {
       }
     }
   }
-  // Tính % hoàn thành
   Object.values(result).forEach(groupData => {
     Object.values(groupData).forEach(item => {
       if (!item.contractQty || isNaN(item.contractQty) || item.contractQty <= 0) {
@@ -240,7 +261,13 @@ export default function LanhDaoBan() {
                     <td>{idx + 1}</td>
                     <td>{item.task.task_name}</td>
                     <td>
-                      {isNaN(item.contractQty) || !item.contractQty ? "" : item.contractQty}
+                      {(isNaN(item.contractQty) || !item.contractQty)
+                        ? ""
+                        : (item.contractQty < 1
+                          ? <span style={{ color: "orange", fontWeight: 600 }}>{item.contractQty} ⚠️</span>
+                          : item.contractQty
+                        )
+                      }
                     </td>
                     <td>
                       {isNaN(item.totalActual) || !item.totalActual ? "" : item.totalActual}
@@ -264,6 +291,12 @@ export default function LanhDaoBan() {
                 ))}
               </tbody>
             </table>
+            {/* Cảnh báo nếu có khối lượng hợp đồng nhỏ bất thường */}
+            {Object.values(groupData).some(item => item.contractQty < 1 && item.contractQty > 0) && (
+              <div style={{ color: "orange", margin: "8px 0 0 8px" }}>
+                ⚠️ Phát hiện khối lượng hợp đồng nhỏ bất thường, hãy kiểm tra lại số liệu!
+              </div>
+            )}
           </div>
         ))}
       </div>
