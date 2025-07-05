@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Chuẩn hóa tên công việc
+// Hàm chuẩn hóa tên công việc: mapping mọi dạng K90, K95, K98, v.v.
 function normalizeString(str) {
   if (!str) return "";
   let s = str
@@ -21,11 +21,35 @@ function normalizeString(str) {
   return s;
 }
 
-// Chuẩn hóa số cho hợp đồng: chỉ bỏ dấu chấm ngăn nghìn, giữ phẩy cho thập phân
+// Đọc số thực hiện tuần: phân biệt mọi kiểu chuỗi số Việt Nam/Châu Âu/Mỹ
+function parseWeekValue(str) {
+  if (typeof str === "number") return str;
+  if (!str) return 0;
+  if (str.includes(".") && str.includes(",")) {
+    // "1.234,56" → "1234.56"
+    return parseFloat(str.replace(/\./g, "").replace(",", "."));
+  }
+  if (!str.includes(".") && str.includes(",")) {
+    // "153,12" → "153.12"
+    return parseFloat(str.replace(",", "."));
+  }
+  // Chỉ có số và chấm (kiểu Mỹ hoặc JS): "153.12"
+  return parseFloat(str);
+}
+
+// Đọc số hợp đồng: loại mọi trường hợp mất dấu
 function calcContractQuantity(design_quantity, unit) {
+  if (typeof design_quantity === "number") return design_quantity;
   if (!design_quantity) return 0;
-  let numStr = String(design_quantity).replace(/\./g, "");
-  let num = Number(numStr.replace(",", "."));
+  let str = String(design_quantity);
+  if (str.includes(",") && str.includes(".")) {
+    str = str.replace(/\./g, "").replace(",", ".");
+  } else if (str.includes(".") && !str.includes(",")) {
+    str = str.replace(/\./g, "");
+  } else if (str.includes(",")) {
+    str = str.replace(",", ".");
+  }
+  let num = Number(str);
   if (!unit) return num;
   let match = unit.match(/^(\d+)\s*(m3|m2|m)$/i);
   if (match) {
@@ -35,12 +59,6 @@ function calcContractQuantity(design_quantity, unit) {
     }
   }
   return num;
-}
-
-// Chuẩn hóa số cho thực hiện tuần: bỏ chấm, phẩy thành chấm
-function parseWeekValue(str) {
-  if (!str) return 0;
-  return parseFloat(String(str).replace(/\./g, "").replace(",", "."));
 }
 
 // So khớp công việc hợp đồng
@@ -70,6 +88,7 @@ function findProjectTask(subName, projectTasks) {
   return null;
 }
 
+// Độ tương đồng tên (Levenshtein)
 function similarity(a, b) {
   if (!a || !b) return 0;
   if (a === b) return 1;
@@ -99,7 +118,7 @@ function similarity(a, b) {
   return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
 }
 
-// Tổng hợp tiến độ cho từng tuyến/hạng mục riêng biệt
+// Tổng hợp tiến độ cho từng tuyến/hạng mục
 function getTaskProgressByGroup(weeklyReports, projectTasks) {
   const result = {};
   for (const row of weeklyReports) {
