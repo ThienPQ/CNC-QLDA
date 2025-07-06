@@ -2,42 +2,21 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Hàm đọc số và nhân hệ số đơn vị nếu có, chỉ lấy 2 số sau dấu thập phân
-function parseVnNumber(val, unit = "") {
+// Hàm đọc số Việt Nam
+function parseVnNumber(val) {
   if (typeof val === "number") return val;
   if (!val) return 0;
-  // Bỏ dấu phẩy ngăn nghìn nếu có, giữ dấu chấm là thập phân
-  let num = Number(val.toString().replace(/,/g, ""));
-  if (isNaN(num)) return 0;
-  // Nếu đơn vị dạng 100m3, 10m2, ... thì tách số và nhân
-  if (unit) {
-    const m = unit.match(/^(\d+)\s*(m3|m2|m|cái|bộ)?$/i);
-    if (m) {
-      num = num * Number(m[1]);
-    }
-  }
-  // Luôn làm tròn 2 số sau dấu thập phân khi so sánh, hiển thị
-  return Number(num.toFixed(2));
+  let normalized = val.toString().replace(/\./g, "").replace(/,/g, ".");
+  let num = Number(normalized);
+  return isNaN(num) ? 0 : num;
 }
-
-// Đọc khối lượng hợp đồng
-function calcContractQuantity(val, unit) {
-  return parseVnNumber(val, unit);
-}
-
-// Đọc khối lượng thực hiện tuần
-function parseWeekValue(val, unit) {
-  return parseVnNumber(val, unit);
-}
-
-// Hiển thị luôn chỉ 2 số sau dấu thập phân, chuẩn en-US
 function formatVnNumber(num) {
   if (typeof num !== "number") num = Number(num);
   if (isNaN(num)) return "";
-  return num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return num.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// --- Các phần code khác của bạn giữ nguyên ---
+// Hàm chuẩn hóa tên việc
 function normalizeString(str) {
   if (!str) return "";
   let s = str
@@ -56,6 +35,7 @@ function normalizeString(str) {
   return s;
 }
 
+// Xử lý hệ số đơn vị (100m3, 100m2, m3, m2, ...)
 function getUnitFactor(unit) {
   if (!unit) return [1, ""];
   let m = unit.match(/^(\d+)\s*(m3|m2|m|cái|bộ)?$/i);
@@ -65,6 +45,13 @@ function getUnitFactor(unit) {
   return [1, unit.toLowerCase()];
 }
 
+function calcContractQuantity(val, unit) {
+  let num = parseVnNumber(val);
+  const [factor] = getUnitFactor(unit);
+  return num * factor;
+}
+
+// Chỉ nhóm + task + đơn vị, không ép tuyến/hạng mục
 function getTaskProgressByGroup(weeklyReports, projectTasks) {
   const result = {};
   for (const row of weeklyReports) {
@@ -94,7 +81,7 @@ function getTaskProgressByGroup(weeklyReports, projectTasks) {
       };
     }
 
-    let v = parseWeekValue(row.thiet_ke, row.unit || row.dvt || row.donvi || "");
+    let v = parseVnNumber(row.thiet_ke);
     if (!isNaN(v) && v > 0) {
       result[group][taskKey].totalActual += v;
     }
