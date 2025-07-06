@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// --- Hàm đọc số chuẩn Việt Nam ---
+// Hàm đọc số Việt Nam
 function parseVnNumber(val) {
   if (typeof val === "number") return val;
   if (!val) return 0;
@@ -10,27 +10,13 @@ function parseVnNumber(val) {
   let num = Number(normalized);
   return isNaN(num) ? 0 : num;
 }
-
-// --- Hàm cộng dồn khối lượng hợp đồng ---
-function calcContractQuantity(val, unit) {
-  let num = parseVnNumber(val);
-  if (!unit) return num;
-  let match = unit.match(/^(\d+)\s*(m3|m2|m)$/i);
-  if (match) {
-    let factor = Number(match[1]);
-    if (!isNaN(factor)) {
-      return num * factor;
-    }
-  }
-  return num;
+function formatVnNumber(num) {
+  if (typeof num !== "number") num = Number(num);
+  if (isNaN(num)) return "";
+  return num.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// --- Hàm đọc số khối lượng thực hiện tuần ---
-function parseWeekValue(val) {
-  return parseVnNumber(val);
-}
-
-// --- Hàm chuẩn hóa tên công việc ---
+// Hàm chuẩn hóa tên việc
 function normalizeString(str) {
   if (!str) return "";
   let s = str
@@ -49,7 +35,7 @@ function normalizeString(str) {
   return s;
 }
 
-// --- Đọc hệ số đơn vị ---
+// Xử lý hệ số đơn vị (100m3, 100m2, m3, m2, ...)
 function getUnitFactor(unit) {
   if (!unit) return [1, ""];
   let m = unit.match(/^(\d+)\s*(m3|m2|m|cái|bộ)?$/i);
@@ -59,75 +45,68 @@ function getUnitFactor(unit) {
   return [1, unit.toLowerCase()];
 }
 
-// --- So khớp tên công việc và đơn vị ---
-function matchTask(subName, subUnit, task, taskUnit) {
-  if (normalizeString(subName) !== normalizeString(task)) return false;
-  const [subFactor, subDonvi] = getUnitFactor(subUnit);
-  const [taskFactor, taskDonvi] = getUnitFactor(taskUnit);
-  return subDonvi === taskDonvi;
+function calcContractQuantity(val, unit) {
+  let num = parseVnNumber(val);
+  const [factor] = getUnitFactor(unit);
+  return num * factor;
 }
 
-function findProjectTask(row, projectTasks) {
-  const subName = row.sub_name;
-  const subUnit = (row.unit || row.dvt || row.donvi || "").toLowerCase();
-  return (
-    projectTasks.find(
-      (pt) =>
-        matchTask(subName, subUnit, pt.task_name, (pt.unit || pt.dvt || pt.donvi || "").toLowerCase())
-    ) || null
-  );
-}
-
+// KHỚP CÔNG VIỆC VÀO TỪNG TUYẾN/HẠNG MỤC, không cộng dồn nhầm!
 function getTaskProgressByGroup(weeklyReports, projectTasks) {
+  // result[group][route][task]
   const result = {};
   for (const row of weeklyReports) {
-    const group = row.group_name || row.group_code || "Nhóm khác";
+    const group = (row.group_name || row.group_code || "Nhóm khác").trim();
+    const route = (row.route_name || row.route_code || row.tuyen || "").trim();
+    const subName = row.sub_name;
     const subUnit = (row.unit || row.dvt || row.donvi || "").toLowerCase();
-    const matched = findProjectTask(row, projectTasks);
 
-    if (matched) {
-      const taskKey = matched.task_name;
-      const [taskFactor, taskDonvi] = getUnitFactor((matched.unit || matched.dvt || matched.donvi || "").toLowerCase());
-      const [subFactor, subDonvi] = getUnitFactor(subUnit);
+    // Tìm task khớp nhóm/tuyến/việc/đơn vị
+    const matched = projectTasks.find(
+      (pt) =>
+        (pt.group_name || "").trim() === group &&
+        (pt.route_name || "").trim() === route &&
+        normalizeString(pt.task_name) === normalizeString(subName) &&
+        (pt.unit || pt.dvt || pt.donvi || "").toLowerCase() === subUnit
+    );
 
-      if (!result[group]) result[group] = {};
-      if (!result[group][taskKey]) {
-        let contractQty = parseVnNumber(matched.design_quantity) * taskFactor;
-        result[group][taskKey] = {
-          task: matched,
-          contractQty,
-          totalActual: 0,
-        };
-      }
+    if (!matched) continue;
 
-      // Nếu đơn vị khác hệ số, phải quy đổi
-      let v = parseWeekValue(row.thiet_ke);
-      // Nếu hợp đồng là 100m3, báo cáo là m3 => phải chia v cho 100 (so sánh số lượng nhóm), hoặc ngược lại thì nhân
-      if (taskFactor !== subFactor && subFactor && taskFactor) {
-        v = v * (subFactor / taskFactor);
-      }
-      if (!isNaN(v) && v > 0) {
-        result[group][taskKey].totalActual += v;
-      }
+    // Khởi tạo
+    if (!result[group]) result[group] = {};
+    if (!result[group][route]) result[group][route] = {};
+    const taskKey = matched.task_name;
+
+    if (!result[group][route][taskKey]) {
+      let contractQty = calcContractQuantity(matched.design_quantity, matched.unit || matched.dvt || matched.donvi || "");
+      result[group][route][taskKey] = {
+        task: matched,
+        contractQty,
+        totalActual: 0,
+      };
+    }
+
+    // Cộng khối lượng tuần này
+    let v = parseVnNumber(row.thiet_ke);
+    if (!isNaN(v) && v > 0) {
+      result[group][route][taskKey].totalActual += v;
     }
   }
-  Object.values(result).forEach(groupData => {
-    Object.values(groupData).forEach(item => {
-      if (!item.contractQty || isNaN(item.contractQty) || item.contractQty <= 0) {
-        item.percent = "";
-      } else {
-        const per = (item.totalActual / item.contractQty) * 100;
-        item.percent = per.toFixed(2);
-      }
-    });
-  });
-  return result;
-}
 
-function formatVnNumber(num) {
-  if (typeof num !== "number") num = Number(num);
-  if (isNaN(num)) return "";
-  return num.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Tính %
+  Object.values(result).forEach(routeGroups =>
+    Object.values(routeGroups).forEach(tasks =>
+      Object.values(tasks).forEach(item => {
+        if (!item.contractQty || isNaN(item.contractQty) || item.contractQty <= 0) {
+          item.percent = "";
+        } else {
+          const per = (item.totalActual / item.contractQty) * 100;
+          item.percent = per.toFixed(2);
+        }
+      })
+    )
+  );
+  return result;
 }
 
 export default function LanhDaoBan() {
@@ -215,60 +194,58 @@ export default function LanhDaoBan() {
       {!error && weeklyReports.length === 0 && (
         <div>Không có dữ liệu báo cáo.</div>
       )}
-
       <div style={{ margin: "30px 0 40px 0" }}>
         <h2 style={{ fontWeight: 700, fontSize: 25, color: "#1a3b6b" }}>
           Tổng hợp tiến độ từng hạng mục/việc theo hợp đồng (theo từng tuyến/hạng mục)
         </h2>
-        {Object.entries(progressByGroup).map(([groupName, groupData], i) => (
+        {Object.entries(progressByGroup).map(([groupName, routes], i) => (
           <div key={groupName} style={{ marginBottom: 30 }}>
             <h3 style={{ fontWeight: 700, fontSize: 22, color: "#395989" }}>
               {i + 1}. {groupName}
             </h3>
-            <table border={2} cellPadding={8} style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}>
-              <thead>
-                <tr>
-                  <th>STT</th>
-                  <th>Tên công việc (Hợp đồng)</th>
-                  <th>Khối lượng hợp đồng</th>
-                  <th>Tổng khối lượng thực hiện (tất cả tuần)</th>
-                  <th>% Hoàn thành so với HĐ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.values(groupData).map((item, idx) => (
-                  <tr key={item.task.task_name}>
-                    <td>{idx + 1}</td>
-                    <td>{item.task.task_name}</td>
-                    <td>
-                      {(isNaN(item.contractQty) || !item.contractQty)
-                        ? ""
-                        : (item.contractQty < 1
-                          ? <span style={{ color: "orange", fontWeight: 600 }}>{formatVnNumber(item.contractQty)} ⚠️</span>
-                          : formatVnNumber(item.contractQty)
-                        )
-                      }
-                    </td>
-                    <td>
-                      {isNaN(item.totalActual) || !item.totalActual ? "" : formatVnNumber(item.totalActual)}
-                    </td>
-                    <td>
-                      {item.percent === "" ? "" :
-                        Number(item.percent) > 200 ? (
-                          <span style={{ color: "red", fontWeight: 600 }}>{item.percent}%</span>
-                        ) : (
-                          `${item.percent}%`
-                        )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {Object.values(groupData).some(item => item.contractQty < 1 && item.contractQty > 0) && (
-              <div style={{ color: "orange", margin: "8px 0 0 8px" }}>
-                ⚠️ Phát hiện khối lượng hợp đồng nhỏ bất thường, hãy kiểm tra lại số liệu!
+            {Object.entries(routes).map(([route, groupData], ridx) => (
+              <div key={route} style={{ marginBottom: 12 }}>
+                <h4 style={{ fontWeight: 600, fontSize: 20, color: "#395989" }}>
+                  {route ? `Tuyến/Hạng mục: ${route}` : ""}
+                </h4>
+                <table border={2} cellPadding={8} style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}>
+                  <thead>
+                    <tr>
+                      <th>STT</th>
+                      <th>Tên công việc (Hợp đồng)</th>
+                      <th>Khối lượng hợp đồng</th>
+                      <th>Tổng khối lượng thực hiện (tất cả tuần)</th>
+                      <th>% Hoàn thành so với HĐ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.values(groupData).map((item, idx) => (
+                      <tr key={item.task.task_name}>
+                        <td>{idx + 1}</td>
+                        <td>{item.task.task_name}</td>
+                        <td>
+                          {(isNaN(item.contractQty) || !item.contractQty)
+                            ? ""
+                            : formatVnNumber(item.contractQty)
+                          }
+                        </td>
+                        <td>
+                          {isNaN(item.totalActual) || !item.totalActual ? "" : formatVnNumber(item.totalActual)}
+                        </td>
+                        <td>
+                          {item.percent === "" ? "" :
+                            Number(item.percent) > 200 ? (
+                              <span style={{ color: "red", fontWeight: 600 }}>{item.percent}%</span>
+                            ) : (
+                              `${item.percent}%`
+                            )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            )}
+            ))}
           </div>
         ))}
       </div>
