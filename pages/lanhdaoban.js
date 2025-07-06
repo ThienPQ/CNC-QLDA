@@ -2,7 +2,35 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Chuẩn hóa tên
+// --- Hàm đọc số chuẩn Việt Nam ---
+function parseVnNumber(val) {
+  if (typeof val === "number") return val;
+  if (!val) return 0;
+  let normalized = val.toString().replace(/\./g, "").replace(/,/g, ".");
+  let num = Number(normalized);
+  return isNaN(num) ? 0 : num;
+}
+
+// --- Hàm cộng dồn khối lượng hợp đồng ---
+function calcContractQuantity(val, unit) {
+  let num = parseVnNumber(val);
+  if (!unit) return num;
+  let match = unit.match(/^(\d+)\s*(m3|m2|m)$/i);
+  if (match) {
+    let factor = Number(match[1]);
+    if (!isNaN(factor)) {
+      return num * factor;
+    }
+  }
+  return num;
+}
+
+// --- Hàm đọc số khối lượng thực hiện tuần ---
+function parseWeekValue(val) {
+  return parseVnNumber(val);
+}
+
+// --- Hàm chuẩn hóa tên công việc ---
 function normalizeString(str) {
   if (!str) return "";
   let s = str
@@ -21,7 +49,7 @@ function normalizeString(str) {
   return s;
 }
 
-// Lấy hệ số đơn vị (vd: "100m3" -> [100, "m3"])
+// --- Đọc hệ số đơn vị ---
 function getUnitFactor(unit) {
   if (!unit) return [1, ""];
   let m = unit.match(/^(\d+)\s*(m3|m2|m|cái|bộ)?$/i);
@@ -31,39 +59,7 @@ function getUnitFactor(unit) {
   return [1, unit.toLowerCase()];
 }
 
-// Hàm format số kiểu Việt Nam
-function formatVnNumber(num) {
-  if (typeof num !== "number") num = Number(num);
-  if (isNaN(num)) return "";
-  return num.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-// Parse số tuần (chuẩn Việt Nam)
-function parseWeekValue(val) {
-  if (typeof val === "number") return val;
-  if (!val) return 0;
-  let num = Number(
-    val
-      .toString()
-      .replace(/\./g, "")
-      .replace(/,/g, ".")
-  );
-  return isNaN(num) ? 0 : num;
-}
-
-// Parse số hợp đồng (chuẩn Việt Nam)
-function parseVnContractNumber(val) {
-  if (typeof val === "number") return val;
-  if (!val) return 0;
-  let num = Number(
-    val
-      .toString()
-      .replace(/\./g, "")
-      .replace(/,/g, ".")
-  );
-  return isNaN(num) ? 0 : num;
-}
-
+// --- So khớp tên công việc và đơn vị ---
 function matchTask(subName, subUnit, task, taskUnit) {
   if (normalizeString(subName) !== normalizeString(task)) return false;
   const [subFactor, subDonvi] = getUnitFactor(subUnit);
@@ -71,7 +67,6 @@ function matchTask(subName, subUnit, task, taskUnit) {
   return subDonvi === taskDonvi;
 }
 
-// Tìm công việc hợp đồng tương ứng với tên + đơn vị
 function findProjectTask(row, projectTasks) {
   const subName = row.sub_name;
   const subUnit = (row.unit || row.dvt || row.donvi || "").toLowerCase();
@@ -83,7 +78,6 @@ function findProjectTask(row, projectTasks) {
   );
 }
 
-// Tính toán cộng dồn và chuẩn hóa
 function getTaskProgressByGroup(weeklyReports, projectTasks) {
   const result = {};
   for (const row of weeklyReports) {
@@ -98,7 +92,7 @@ function getTaskProgressByGroup(weeklyReports, projectTasks) {
 
       if (!result[group]) result[group] = {};
       if (!result[group][taskKey]) {
-        let contractQty = parseVnContractNumber(matched.design_quantity) * taskFactor;
+        let contractQty = parseVnNumber(matched.design_quantity) * taskFactor;
         result[group][taskKey] = {
           task: matched,
           contractQty,
@@ -128,6 +122,12 @@ function getTaskProgressByGroup(weeklyReports, projectTasks) {
     });
   });
   return result;
+}
+
+function formatVnNumber(num) {
+  if (typeof num !== "number") num = Number(num);
+  if (isNaN(num)) return "";
+  return num.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export default function LanhDaoBan() {
