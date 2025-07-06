@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Tối ưu hóa so khớp tên công việc (như cũ)
+// Chuẩn hóa tên
 function normalizeString(str) {
   if (!str) return "";
   let s = str
@@ -21,109 +21,99 @@ function normalizeString(str) {
   return s;
 }
 
-// Đọc số thực hiện tuần (đã chuẩn)
+// Lấy hệ số đơn vị (vd: "100m3" -> [100, "m3"])
+function getUnitFactor(unit) {
+  if (!unit) return [1, ""];
+  let m = unit.match(/^(\d+)\s*(m3|m2|m|cái|bộ)?$/i);
+  if (m) return [Number(m[1]), (m[2] || "").toLowerCase()];
+  let m2 = unit.match(/^(m3|m2|m|cái|bộ)$/i);
+  if (m2) return [1, m2[1].toLowerCase()];
+  return [1, unit.toLowerCase()];
+}
+
+// Hàm format số kiểu Việt Nam
+function formatVnNumber(num) {
+  if (typeof num !== "number") num = Number(num);
+  if (isNaN(num)) return "";
+  return num.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Parse số tuần (chuẩn Việt Nam)
 function parseWeekValue(val) {
   if (typeof val === "number") return val;
   if (!val) return 0;
-  return parseFloat(val);
+  let num = Number(
+    val
+      .toString()
+      .replace(/\./g, "")
+      .replace(/,/g, ".")
+  );
+  return isNaN(num) ? 0 : num;
 }
 
-// Đọc số hợp đồng (đã chuẩn)
-function calcContractQuantity(val, unit) {
+// Parse số hợp đồng (chuẩn Việt Nam)
+function parseVnContractNumber(val) {
   if (typeof val === "number") return val;
   if (!val) return 0;
-  let num = parseFloat(val);
-  if (!unit) return num;
-  let match = unit.match(/^(\d+)\s*(m3|m2|m)$/i);
-  if (match) {
-    let factor = Number(match[1]);
-    if (!isNaN(factor)) {
-      return num * factor;
-    }
-  }
-  return num;
+  let num = Number(
+    val
+      .toString()
+      .replace(/\./g, "")
+      .replace(/,/g, ".")
+  );
+  return isNaN(num) ? 0 : num;
 }
 
-// So khớp công việc hợp đồng (như trước)
-function findProjectTask(subName, projectTasks) {
-  const n1 = normalizeString(subName);
-  if (!n1) return null;
-  let found = projectTasks.find(pt => {
-    const n2 = normalizeString(pt.task_name);
-    return n1 === n2;
-  });
-  if (found) return found;
-  let foundSoft = projectTasks.find(pt => {
-    const n2 = normalizeString(pt.task_name);
-    return n2.includes(n1) || n1.includes(n2);
-  });
-  if (foundSoft) return foundSoft;
-  let best = null, bestScore = 0.0;
-  for (let pt of projectTasks) {
-    const n2 = normalizeString(pt.task_name);
-    let score = similarity(n1, n2);
-    if (score > bestScore) {
-      bestScore = score;
-      best = pt;
-    }
-  }
-  if (best && bestScore > 0.2) return best;
-  return null;
+function matchTask(subName, subUnit, task, taskUnit) {
+  if (normalizeString(subName) !== normalizeString(task)) return false;
+  const [subFactor, subDonvi] = getUnitFactor(subUnit);
+  const [taskFactor, taskDonvi] = getUnitFactor(taskUnit);
+  return subDonvi === taskDonvi;
 }
 
-function similarity(a, b) {
-  if (!a || !b) return 0;
-  if (a === b) return 1;
-  let longer = a.length > b.length ? a : b;
-  let shorter = a.length > b.length ? b : a;
-  let longerLength = longer.length;
-  if (longerLength === 0) return 1.0;
-  let editDistance = (s1, s2) => {
-    let costs = [];
-    for (let i = 0; i <= s1.length; i++) {
-      let lastValue = i;
-      for (let j = 0; j <= s2.length; j++) {
-        if (i === 0) costs[j] = j;
-        else if (j > 0) {
-          let newValue = costs[j - 1];
-          if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
-            newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-          }
-          costs[j - 1] = lastValue;
-          lastValue = newValue;
-        }
-      }
-      if (i > 0) costs[s2.length] = lastValue;
-    }
-    return costs[s2.length];
-  };
-  return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
+// Tìm công việc hợp đồng tương ứng với tên + đơn vị
+function findProjectTask(row, projectTasks) {
+  const subName = row.sub_name;
+  const subUnit = (row.unit || row.dvt || row.donvi || "").toLowerCase();
+  return (
+    projectTasks.find(
+      (pt) =>
+        matchTask(subName, subUnit, pt.task_name, (pt.unit || pt.dvt || pt.donvi || "").toLowerCase())
+    ) || null
+  );
 }
 
-// Tổng hợp tiến độ cho từng tuyến/hạng mục
+// Tính toán cộng dồn và chuẩn hóa
 function getTaskProgressByGroup(weeklyReports, projectTasks) {
   const result = {};
   for (const row of weeklyReports) {
     const group = row.group_name || row.group_code || "Nhóm khác";
-    const matched = findProjectTask(row.sub_name, projectTasks);
+    const subUnit = (row.unit || row.dvt || row.donvi || "").toLowerCase();
+    const matched = findProjectTask(row, projectTasks);
+
     if (matched) {
       const taskKey = matched.task_name;
+      const [taskFactor, taskDonvi] = getUnitFactor((matched.unit || matched.dvt || matched.donvi || "").toLowerCase());
+      const [subFactor, subDonvi] = getUnitFactor(subUnit);
+
       if (!result[group]) result[group] = {};
       if (!result[group][taskKey]) {
+        let contractQty = parseVnContractNumber(matched.design_quantity) * taskFactor;
         result[group][taskKey] = {
           task: matched,
+          contractQty,
           totalActual: 0,
-          contractQty: calcContractQuantity(
-            matched.design_quantity,
-            matched.unit || matched.donvi || matched.dvt
-          ),
-          listRows: [],
         };
       }
-      const v = parseWeekValue(row.thiet_ke);
+
+      // Nếu đơn vị khác hệ số, phải quy đổi
+      let v = parseWeekValue(row.thiet_ke);
+      // Nếu hợp đồng là 100m3, báo cáo là m3 => phải chia v cho 100 (so sánh số lượng nhóm), hoặc ngược lại thì nhân
+      if (taskFactor !== subFactor && subFactor && taskFactor) {
+        v = v * (subFactor / taskFactor);
+      }
       if (!isNaN(v) && v > 0) {
         result[group][taskKey].totalActual += v;
-        result[group][taskKey].listRows.push(row);
       }
     }
   }
@@ -133,7 +123,7 @@ function getTaskProgressByGroup(weeklyReports, projectTasks) {
         item.percent = "";
       } else {
         const per = (item.totalActual / item.contractQty) * 100;
-        item.percent = per > 200 ? ">200" : per.toFixed(1);
+        item.percent = per.toFixed(2);
       }
     });
   });
@@ -197,17 +187,6 @@ export default function LanhDaoBan() {
     fetchData();
   }, [fromDate, toDate]);
 
-  const grouped = {};
-  for (const row of weeklyReports) {
-    if (!grouped[row.group_code]) {
-      grouped[row.group_code] = {
-        group_name: row.group_name,
-        details: [],
-      };
-    }
-    grouped[row.group_code].details.push(row);
-  }
-
   const progressByGroup = getTaskProgressByGroup(weeklyReports, projectTasks);
 
   return (
@@ -254,7 +233,6 @@ export default function LanhDaoBan() {
                   <th>Khối lượng hợp đồng</th>
                   <th>Tổng khối lượng thực hiện (tất cả tuần)</th>
                   <th>% Hoàn thành so với HĐ</th>
-                  <th>Các báo cáo thực tế (công việc tương ứng)</th>
                 </tr>
               </thead>
               <tbody>
@@ -266,28 +244,21 @@ export default function LanhDaoBan() {
                       {(isNaN(item.contractQty) || !item.contractQty)
                         ? ""
                         : (item.contractQty < 1
-                          ? <span style={{ color: "orange", fontWeight: 600 }}>{Math.round(item.contractQty * 100) / 100} ⚠️</span>
-                          : Math.round(item.contractQty * 100) / 100
+                          ? <span style={{ color: "orange", fontWeight: 600 }}>{formatVnNumber(item.contractQty)} ⚠️</span>
+                          : formatVnNumber(item.contractQty)
                         )
                       }
                     </td>
                     <td>
-                      {isNaN(item.totalActual) || !item.totalActual ? "" : Math.round(item.totalActual * 100) / 100}
+                      {isNaN(item.totalActual) || !item.totalActual ? "" : formatVnNumber(item.totalActual)}
                     </td>
                     <td>
                       {item.percent === "" ? "" :
-                        item.percent === ">200" ? (
-                          <span style={{ color: "red", fontWeight: 600 }}>Quá lớn</span>
+                        Number(item.percent) > 200 ? (
+                          <span style={{ color: "red", fontWeight: 600 }}>{item.percent}%</span>
                         ) : (
                           `${item.percent}%`
                         )}
-                    </td>
-                    <td>
-                      {item.listRows.map(r =>
-                        <div key={r.sub_name + r.group_code}>
-                          <b>{r.group_name}:</b> {r.sub_name} ({r.thiet_ke})
-                        </div>
-                      )}
                     </td>
                   </tr>
                 ))}
