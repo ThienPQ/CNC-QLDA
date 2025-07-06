@@ -2,14 +2,35 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// --- Hàm đọc số chuẩn Việt Nam ---
-function parseVnNumber(val) {
+// Hàm đọc số và nhân hệ số đơn vị nếu có, chỉ lấy 2 số sau dấu thập phân
+function parseVnNumber(val, unit = "") {
   if (typeof val === "number") return val;
   if (!val) return 0;
-  let normalized = val.toString().replace(/\./g, "").replace(/,/g, ".");
-  let num = Number(normalized);
-  return isNaN(num) ? 0 : num;
+  let num = Number(val.toString().replace(/,/g, ""));
+  if (isNaN(num)) return 0;
+  // Nếu đơn vị dạng 100m3, 10m2, ... thì tách số và nhân
+  if (unit) {
+    const m = unit.match(/^(\d+)\s*(m3|m2|m|cái|bộ)?$/i);
+    if (m) {
+      num = num * Number(m[1]);
+    }
+  }
+  return Number(num.toFixed(2));
 }
+
+// Dùng các hàm này đúng vị trí trong code cũ:
+function calcContractQuantity(val, unit) {
+  return parseVnNumber(val, unit);
+}
+function parseWeekValue(val, unit) {
+  return parseVnNumber(val, unit);
+}
+function formatVnNumber(num) {
+  if (typeof num !== "number") num = Number(num);
+  if (isNaN(num)) return "";
+  return num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 
 // --- Hàm cộng dồn khối lượng hợp đồng ---
 function calcContractQuantity(val, unit) {
