@@ -2,56 +2,39 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// Hàm đọc số và nhân hệ số đơn vị nếu có, chỉ lấy 2 số sau dấu thập phân
-function parseVnNumber(val, unit = "") {
+// Hàm đọc số chuẩn Việt Nam (1200.23 là một ngàn hai trăm phẩy hai ba)
+function parseVnNumber(val) {
   if (typeof val === "number") return val;
   if (!val) return 0;
   let num = Number(val.toString().replace(/,/g, ""));
-  if (isNaN(num)) return 0;
-  // Nếu đơn vị dạng 100m3, 10m2, ... thì tách số và nhân
-  if (unit) {
-    const m = unit.match(/^(\d+)\s*(m3|m2|m|cái|bộ)?$/i);
-    if (m) {
-      num = num * Number(m[1]);
-    }
-  }
-  return Number(num.toFixed(2));
+  return isNaN(num) ? 0 : num;
 }
 
-// Dùng các hàm này đúng vị trí trong code cũ:
-function calcContractQuantity(val, unit) {
-  return parseVnNumber(val, unit);
-}
-function parseWeekValue(val, unit) {
-  return parseVnNumber(val, unit);
-}
-function formatVnNumber(num) {
-  if (typeof num !== "number") num = Number(num);
-  if (isNaN(num)) return "";
-  return num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Hàm lấy hệ số từ đơn vị kiểu 100m3, 10m2, 100m...
+function getUnitFactor(unit) {
+  if (!unit) return [1, ""];
+  let m = unit.match(/^(\d+)\s*(m3|m2|m|cái|bộ)?$/i);
+  if (m) return [Number(m[1]), (m[2] || "").toLowerCase()];
+  let m2 = unit.match(/^(m3|m2|m|cái|bộ)$/i);
+  if (m2) return [1, m2[1].toLowerCase()];
+  return [1, unit.toLowerCase()];
 }
 
-
-// --- Hàm cộng dồn khối lượng hợp đồng ---
+// Hàm cộng dồn khối lượng hợp đồng (nhân hệ số nếu có)
 function calcContractQuantity(val, unit) {
   let num = parseVnNumber(val);
-  if (!unit) return num;
-  let match = unit.match(/^(\d+)\s*(m3|m2|m)$/i);
-  if (match) {
-    let factor = Number(match[1]);
-    if (!isNaN(factor)) {
-      return num * factor;
-    }
-  }
-  return num;
+  const [factor] = getUnitFactor(unit);
+  return num * factor;
 }
 
-// --- Hàm đọc số khối lượng thực hiện tuần ---
-function parseWeekValue(val) {
-  return parseVnNumber(val);
+// Hàm đọc số khối lượng thực hiện tuần (nhân hệ số nếu có)
+function parseWeekValue(val, unit) {
+  let num = parseVnNumber(val);
+  const [factor] = getUnitFactor(unit);
+  return num * factor;
 }
 
-// --- Hàm chuẩn hóa tên công việc ---
+// Hàm chuẩn hóa tên công việc (KHÔNG SỬA GÌ Ở ĐÂY)
 function normalizeString(str) {
   if (!str) return "";
   let s = str
@@ -70,17 +53,6 @@ function normalizeString(str) {
   return s;
 }
 
-// --- Đọc hệ số đơn vị ---
-function getUnitFactor(unit) {
-  if (!unit) return [1, ""];
-  let m = unit.match(/^(\d+)\s*(m3|m2|m|cái|bộ)?$/i);
-  if (m) return [Number(m[1]), (m[2] || "").toLowerCase()];
-  let m2 = unit.match(/^(m3|m2|m|cái|bộ)$/i);
-  if (m2) return [1, m2[1].toLowerCase()];
-  return [1, unit.toLowerCase()];
-}
-
-// --- So khớp tên công việc và đơn vị ---
 function matchTask(subName, subUnit, task, taskUnit) {
   if (normalizeString(subName) !== normalizeString(task)) return false;
   const [subFactor, subDonvi] = getUnitFactor(subUnit);
@@ -113,7 +85,7 @@ function getTaskProgressByGroup(weeklyReports, projectTasks) {
 
       if (!result[group]) result[group] = {};
       if (!result[group][taskKey]) {
-        let contractQty = parseVnNumber(matched.design_quantity) * taskFactor;
+        let contractQty = calcContractQuantity(matched.design_quantity, matched.unit || matched.dvt || matched.donvi);
         result[group][taskKey] = {
           task: matched,
           contractQty,
@@ -121,9 +93,8 @@ function getTaskProgressByGroup(weeklyReports, projectTasks) {
         };
       }
 
-      // Nếu đơn vị khác hệ số, phải quy đổi
-      let v = parseWeekValue(row.thiet_ke);
-      // Nếu hợp đồng là 100m3, báo cáo là m3 => phải chia v cho 100 (so sánh số lượng nhóm), hoặc ngược lại thì nhân
+      let v = parseWeekValue(row.thiet_ke, row.unit || row.dvt || row.donvi);
+      // Nếu hợp đồng là 100m3, báo cáo là m3 => quy đổi, hoặc ngược lại
       if (taskFactor !== subFactor && subFactor && taskFactor) {
         v = v * (subFactor / taskFactor);
       }
@@ -145,6 +116,7 @@ function getTaskProgressByGroup(weeklyReports, projectTasks) {
   return result;
 }
 
+// Hàm hiển thị chuẩn Việt Nam, luôn lấy 2 số sau dấu phẩy, không có dấu phẩy hàng nghìn
 function formatVnNumber(num) {
   if (typeof num !== "number") num = Number(num);
   if (isNaN(num)) return "";
