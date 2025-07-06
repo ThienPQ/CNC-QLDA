@@ -51,60 +51,51 @@ function calcContractQuantity(val, unit) {
   return num * factor;
 }
 
-// KHỚP CÔNG VIỆC VÀO TỪNG TUYẾN/HẠNG MỤC, không cộng dồn nhầm!
+// Chỉ nhóm + task + đơn vị, không ép tuyến/hạng mục
 function getTaskProgressByGroup(weeklyReports, projectTasks) {
-  // result[group][route][task]
   const result = {};
   for (const row of weeklyReports) {
     const group = (row.group_name || row.group_code || "Nhóm khác").trim();
-    const route = (row.route_name || row.route_code || row.tuyen || "").trim();
     const subName = row.sub_name;
     const subUnit = (row.unit || row.dvt || row.donvi || "").toLowerCase();
 
-    // Tìm task khớp nhóm/tuyến/việc/đơn vị
+    // Tìm task khớp nhóm/việc/đơn vị
     const matched = projectTasks.find(
       (pt) =>
         (pt.group_name || "").trim() === group &&
-        (pt.route_name || "").trim() === route &&
         normalizeString(pt.task_name) === normalizeString(subName) &&
         (pt.unit || pt.dvt || pt.donvi || "").toLowerCase() === subUnit
     );
 
     if (!matched) continue;
 
-    // Khởi tạo
     if (!result[group]) result[group] = {};
-    if (!result[group][route]) result[group][route] = {};
     const taskKey = matched.task_name;
 
-    if (!result[group][route][taskKey]) {
+    if (!result[group][taskKey]) {
       let contractQty = calcContractQuantity(matched.design_quantity, matched.unit || matched.dvt || matched.donvi || "");
-      result[group][route][taskKey] = {
+      result[group][taskKey] = {
         task: matched,
         contractQty,
         totalActual: 0,
       };
     }
 
-    // Cộng khối lượng tuần này
     let v = parseVnNumber(row.thiet_ke);
     if (!isNaN(v) && v > 0) {
-      result[group][route][taskKey].totalActual += v;
+      result[group][taskKey].totalActual += v;
     }
   }
 
-  // Tính %
-  Object.values(result).forEach(routeGroups =>
-    Object.values(routeGroups).forEach(tasks =>
-      Object.values(tasks).forEach(item => {
-        if (!item.contractQty || isNaN(item.contractQty) || item.contractQty <= 0) {
-          item.percent = "";
-        } else {
-          const per = (item.totalActual / item.contractQty) * 100;
-          item.percent = per.toFixed(2);
-        }
-      })
-    )
+  Object.values(result).forEach(groupData =>
+    Object.values(groupData).forEach(item => {
+      if (!item.contractQty || isNaN(item.contractQty) || item.contractQty <= 0) {
+        item.percent = "";
+      } else {
+        const per = (item.totalActual / item.contractQty) * 100;
+        item.percent = per.toFixed(2);
+      }
+    })
   );
   return result;
 }
@@ -196,56 +187,49 @@ export default function LanhDaoBan() {
       )}
       <div style={{ margin: "30px 0 40px 0" }}>
         <h2 style={{ fontWeight: 700, fontSize: 25, color: "#1a3b6b" }}>
-          Tổng hợp tiến độ từng hạng mục/việc theo hợp đồng (theo từng tuyến/hạng mục)
+          Tổng hợp tiến độ từng hạng mục/việc theo hợp đồng (theo từng nhóm công việc)
         </h2>
-        {Object.entries(progressByGroup).map(([groupName, routes], i) => (
+        {Object.entries(progressByGroup).map(([groupName, groupData], i) => (
           <div key={groupName} style={{ marginBottom: 30 }}>
             <h3 style={{ fontWeight: 700, fontSize: 22, color: "#395989" }}>
               {i + 1}. {groupName}
             </h3>
-            {Object.entries(routes).map(([route, groupData], ridx) => (
-              <div key={route} style={{ marginBottom: 12 }}>
-                <h4 style={{ fontWeight: 600, fontSize: 20, color: "#395989" }}>
-                  {route ? `Tuyến/Hạng mục: ${route}` : ""}
-                </h4>
-                <table border={2} cellPadding={8} style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}>
-                  <thead>
-                    <tr>
-                      <th>STT</th>
-                      <th>Tên công việc (Hợp đồng)</th>
-                      <th>Khối lượng hợp đồng</th>
-                      <th>Tổng khối lượng thực hiện (tất cả tuần)</th>
-                      <th>% Hoàn thành so với HĐ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.values(groupData).map((item, idx) => (
-                      <tr key={item.task.task_name}>
-                        <td>{idx + 1}</td>
-                        <td>{item.task.task_name}</td>
-                        <td>
-                          {(isNaN(item.contractQty) || !item.contractQty)
-                            ? ""
-                            : formatVnNumber(item.contractQty)
-                          }
-                        </td>
-                        <td>
-                          {isNaN(item.totalActual) || !item.totalActual ? "" : formatVnNumber(item.totalActual)}
-                        </td>
-                        <td>
-                          {item.percent === "" ? "" :
-                            Number(item.percent) > 200 ? (
-                              <span style={{ color: "red", fontWeight: 600 }}>{item.percent}%</span>
-                            ) : (
-                              `${item.percent}%`
-                            )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
+            <table border={2} cellPadding={8} style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}>
+              <thead>
+                <tr>
+                  <th>STT</th>
+                  <th>Tên công việc (Hợp đồng)</th>
+                  <th>Khối lượng hợp đồng</th>
+                  <th>Tổng khối lượng thực hiện (tất cả tuần)</th>
+                  <th>% Hoàn thành so với HĐ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.values(groupData).map((item, idx) => (
+                  <tr key={item.task.task_name}>
+                    <td>{idx + 1}</td>
+                    <td>{item.task.task_name}</td>
+                    <td>
+                      {(isNaN(item.contractQty) || !item.contractQty)
+                        ? ""
+                        : formatVnNumber(item.contractQty)
+                      }
+                    </td>
+                    <td>
+                      {isNaN(item.totalActual) || !item.totalActual ? "" : formatVnNumber(item.totalActual)}
+                    </td>
+                    <td>
+                      {item.percent === "" ? "" :
+                        Number(item.percent) > 200 ? (
+                          <span style={{ color: "red", fontWeight: 600 }}>{item.percent}%</span>
+                        ) : (
+                          `${item.percent}%`
+                        )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ))}
       </div>
