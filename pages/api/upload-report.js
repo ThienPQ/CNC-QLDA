@@ -141,9 +141,11 @@ async function handler(req, res) {
       }
       await client.end();
       return res.json({ success: true, count: data.length });
-    } catch (e) {
-      return res.status(500).json({ error: "Lỗi xử lý file", details: e.toString() });
-    }
+catch (e) {
+  console.error(e);
+  return res.status(500).json({ error: "Lỗi xử lý file", details: e.toString() });
+}
+
   });
 }
 
