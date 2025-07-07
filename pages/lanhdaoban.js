@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// ======= Các hàm chuẩn số, tên =======
+// ======= Hàm chuẩn số, chuẩn tên =======
 function parseVnNumber(val) {
   if (typeof val === "number") return val;
   if (!val) return 0;
@@ -48,27 +48,6 @@ function normalizeString(str) {
   s = s.replace(/[^a-zA-Z0-9 ]/g, " ");
   s = s.toLowerCase().replace(/\s+/g, " ").trim();
   return s;
-}
-
-// ==== Gom nhóm lớn ====
-function getGroupDisplayName(groupName) {
-  const n = (groupName || "").toLowerCase();
-  if (n.includes("giao thông") || n.match(/^tuyến|^nút giao/)) return "Giao thông";
-  if (n.includes("thoát nước")) return "Thoát nước mưa";
-  if (n.includes("nội khu")) return "Tuyến nội khu";
-  if (n.includes("tuyến số 2")) return "Tuyến số 2";
-  if (n.includes("chính ct")) return "Tuyến chính CT";
-  if (n.includes("cải tạo")) return "Tuyến cải tạo";
-  return groupName || "Khác";
-}
-function groupWeeklyByBigGroup(weeklyReports) {
-  const result = {};
-  weeklyReports.forEach(row => {
-    const groupBig = getGroupDisplayName(row.group_name || "");
-    if (!result[groupBig]) result[groupBig] = [];
-    result[groupBig].push(row);
-  });
-  return result;
 }
 
 import React from "react";
@@ -149,18 +128,24 @@ Với nội dung thế này thì lãnh đạo phải chỉ đạo gì để đ�
     }
   }
 
-  // Tìm tuần báo cáo mới nhất để mặc định lọc
-  const latestToDate = weeklyReports.reduce((max, row) => {
-    if (row.to_date && (!max || row.to_date > max)) return row.to_date;
-    return max;
-  }, "");
-  // Dữ liệu theo tuần lọc (nếu không chọn tuần, mặc định tuần mới nhất)
+  // Gom group_code+group_name, sắp xếp theo group_code
   const filteredWeekly = weeklyReports.filter(row => {
     const date = row.to_date || "";
     return (!fromDate || date >= fromDate) && (!toDate || date <= toDate);
   });
-
-  const groupedWeekly = groupWeeklyByBigGroup(filteredWeekly);
+  const groups = {};
+  filteredWeekly.forEach(row => {
+    const gcode = row.group_code || "";
+    const gname = row.group_name || "";
+    const groupKey = gcode + " " + gname;
+    if (!groups[groupKey]) groups[groupKey] = [];
+    groups[groupKey].push(row);
+  });
+  const sortedGroupKeys = Object.keys(groups).sort((a, b) => {
+    // Sắp xếp group_code tăng dần
+    const ac = a.split(" ")[0], bc = b.split(" ")[0];
+    return ac.localeCompare(bc, "vi", { numeric: true });
+  });
 
   return (
     <div className="p-4">
@@ -189,11 +174,11 @@ Với nội dung thế này thì lãnh đạo phải chỉ đạo gì để đ�
         <div>Không có dữ liệu báo cáo.</div>
       )}
 
-      {/* HIỂN THỊ THEO NHÓM LỚN */}
-      {Object.entries(groupedWeekly).map(([bigGroup, rows], idxGroup) => (
-        <div key={bigGroup} style={{ marginBottom: 36 }}>
-          <h2 style={{ fontWeight: 700, fontSize: 24, color: "#0a3e6d" }}>
-            {idxGroup + 1}. {bigGroup}
+      {/* HIỂN THỊ THEO GROUP CODE + GROUP NAME */}
+      {sortedGroupKeys.map((groupKey, idxGroup) => (
+        <div key={groupKey} style={{ marginBottom: 36 }}>
+          <h2 style={{ fontWeight: 700, fontSize: 22, color: "#0a3e6d" }}>
+            {idxGroup + 1}. {groupKey}
           </h2>
           <table border={2} cellPadding={8} style={{ background: "#fff", minWidth: 1100 }}>
             <thead>
@@ -210,7 +195,7 @@ Với nội dung thế này thì lãnh đạo phải chỉ đạo gì để đ�
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, idx) => {
+              {groups[groupKey].map((row, idx) => {
                 const matched = projectTasks.find(
                   (pt) =>
                     normalizeString(pt.task_name) === normalizeString(row.sub_name) &&
@@ -219,7 +204,7 @@ Với nội dung thế này thì lãnh đạo phải chỉ đạo gì để đ�
                 const weekQty = parseWeekValue(row.thiet_ke, row.unit || "");
                 const contractQty = matched ? calcContractQuantity(matched.design_quantity, matched.unit || "") : 0;
                 const percent = (contractQty > 0 && weekQty > 0) ? ((weekQty / contractQty) * 100).toFixed(2) : "";
-                const aiKey = `${bigGroup}_${idx}`;
+                const aiKey = `${groupKey}_${idx}`;
                 return (
                   <React.Fragment key={idx}>
                     <tr>
