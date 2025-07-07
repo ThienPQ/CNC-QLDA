@@ -1,152 +1,110 @@
-import formidable from "formidable";
-import fs from "fs";
-import { Client } from "pg"; // Dùng Neon/Postgres. Nếu MySQL thì đổi kết nối.
-import * as XLSX from "xlsx";
+import React, { useState } from "react";
 
-export const config = { api: { bodyParser: false } };
+export default function BanQLDA() {
+  const [contractFile, setContractFile] = useState(null);
+  const [reportFile, setReportFile] = useState(null);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [loading, setLoading] = useState(false);
 
-function parseVnNumber(val) {
-  if (!val) return 0;
-  // Chuyển "1.234,56" thành 1234.56 (chuẩn VN)
-  let s = val.toString().replace(/\./g, '').replace(/,/g, '.');
-  let num = Number(s);
-  return isNaN(num) ? 0 : num;
-}
-function isRomanNumeral(str) {
-  return /^(I|II|III|IV|V|VI|VII|VIII|IX|X)$/.test(str.trim());
-}
-function isSubCode(str) {
-  return /^[IVX]+\.\d+$/.test(str.trim());
-}
-function isStt(str) {
-  return /^\d+$/.test(str.trim());
-}
-function cleanKey(str) {
-  return (str || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-function findSheetByName(wb) {
-  const sheetNames = wb.SheetNames;
-  // Ưu tiên sheet có "bc" và "tuan" (hoặc dùng sheet đầu)
-  const found = sheetNames.find(name => name.toLowerCase().includes("bc") && name.toLowerCase().includes("tuan"));
-  return found || sheetNames[0];
-}
+  // Hiện popup lỗi chi tiết
+  const showError = (title, error, details) => {
+    let msg = error ? error : "Lỗi không xác định";
+    if (details) msg += "\n\nChi tiết: " + details;
+    alert(`${title}\n\n${msg}`);
+  };
 
-async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).end();
+  const handleContractChange = (e) => {
+    setContractFile(e.target.files[0]);
+  };
 
-  const form = new formidable.IncomingForm();
-  form.parse(req, async (err, fields, files) => {
-    if (err) return res.status(500).json({ error: "Lỗi upload", details: err.toString() });
+  const handleReportChange = (e) => {
+    setReportFile(e.target.files[0]);
+  };
 
+  const handleUploadContract = async () => {
+    if (!contractFile) {
+      alert("Chưa chọn file hợp đồng!");
+      return;
+    }
+    setLoading(true);
+    const formData = new FormData();
+    formData.append("file", contractFile);
     try {
-      const file = files.file;
-      const fromDate = fields.fromDate;
-      const toDate = fields.toDate;
-      if (!file || !fromDate || !toDate) {
-        return res.status(400).json({ error: "Thiếu file hoặc ngày báo cáo" });
-      }
-
-      const workbook = XLSX.read(fs.readFileSync(file.filepath), { type: "buffer" });
-      const sheetName = findSheetByName(workbook);
-      const ws = workbook.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
-
-      // Tìm header tương đối
-      let headerIdx = rows.findIndex(row => {
-        if (!Array.isArray(row)) return false;
-        return row.some(cell =>
-          cleanKey(cell).includes("congviec") || cleanKey(cell).includes("tencongviec")
-        );
+      const res = await fetch("/api/upload-contract", {
+        method: "POST",
+        body: formData,
       });
-      if (headerIdx < 0) return res.status(400).json({ error: "Không tìm thấy dòng tiêu đề, kiểm tra lại file Excel." });
-
-      // Chuẩn hóa map cột
-      const headerRow = rows[headerIdx].map(h => cleanKey(h));
-      const colMap = {
-        task_name: headerRow.findIndex(h => h.includes("congviec")),
-        ly_trinh: headerRow.findIndex(h => h.includes("lytrinh")),
-        unit: headerRow.findIndex(h => h.includes("donvi")),
-        thiet_ke: headerRow.findIndex(h => h.includes("thietke")),
-        percent_week: headerRow.findIndex(h => h.includes("trongtuan")),
-        percent_project: headerRow.findIndex(h => h.includes("theoduan")),
-        note: headerRow.findIndex(h => h.includes("ghichu"))
-      };
-      // Báo lỗi nếu thiếu trường bắt buộc
-      if (colMap.task_name < 0) return res.status(400).json({ error: "Không tìm thấy cột 'Công việc'!" });
-
-      let groupCode = "", groupName = "", subCode = "", subName = "";
-      let data = [];
-      for (let i = headerIdx + 1; i < rows.length; ++i) {
-        let row = rows[i];
-        if (!row || row.length < 3) continue;
-        let cell0 = (row[0] || "").toString().trim();
-
-        if (isRomanNumeral(cell0)) {
-          groupCode = cell0;
-          groupName = (row[1] || "").toString().trim();
-          subCode = ""; subName = "";
-          continue;
-        }
-        if (isSubCode(cell0)) {
-          subCode = cell0;
-          subName = (row[1] || "").toString().trim();
-          continue;
-        }
-        if (isStt(cell0)) {
-          data.push({
-            from_date: fromDate,
-            to_date: toDate,
-            group_code: groupCode,
-            group_name: groupName,
-            sub_code: subCode,
-            sub_name: subName,
-            stt: cell0,
-            task_name: row[colMap.task_name] || "",
-            ly_trinh: row[colMap.ly_trinh] || "",
-            unit: row[colMap.unit] || "",
-            thiet_ke: parseVnNumber(row[colMap.thiet_ke] || ""),
-            percent_week: row[colMap.percent_week] || "",
-            percent_project: row[colMap.percent_project] || "",
-            note: row[colMap.note] || "",
-          });
-        }
+      const data = await res.json();
+      if (!res.ok) {
+        showError("Lỗi tải hợp đồng", data.error, data.details);
+      } else {
+        alert("Tải file hợp đồng thành công!");
+        setContractFile(null);
       }
+    } catch (e) {
+      showError("Lỗi tải hợp đồng", e.message);
+    }
+    setLoading(false);
+  };
 
-      if (!data.length) return res.status(400).json({ error: "Không tìm thấy dữ liệu công việc trong file!" });
-
-      // Kết nối DB (sửa connectionString cho đúng của bạn!)
-      const client = new Client({
-        connectionString: process.env.DATABASE_URL,
+  const handleUploadReport = async () => {
+    if (!reportFile || !fromDate || !toDate) {
+      alert("Vui lòng chọn file báo cáo tuần và nhập đủ ngày!");
+      return;
+    }
+    setLoading(true);
+    const formData = new FormData();
+    formData.append("file", reportFile);
+    formData.append("from_date", fromDate);
+    formData.append("to_date", toDate);
+    try {
+      const res = await fetch("/api/upload-report", {
+        method: "POST",
+        body: formData,
       });
-      await client.connect();
-
-      // Xóa tuần cũ (tuỳ chọn)
-      await client.query(
-        "DELETE FROM weekly_reports WHERE from_date=$1 AND to_date=$2",
-        [fromDate, toDate]
-      );
-
-      for (let d of data) {
-        await client.query(
-          `INSERT INTO weekly_reports
-          (from_date, to_date, group_code, group_name, sub_code, sub_name, stt, task_name, ly_trinh, unit, thiet_ke, percent_week, percent_project, note)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-          [
-            d.from_date, d.to_date, d.group_code, d.group_name,
-            d.sub_code, d.sub_name, d.stt, d.task_name,
-            d.ly_trinh, d.unit, d.thiet_ke,
-            d.percent_week, d.percent_project, d.note
-          ]
-        );
+      const data = await res.json();
+      if (!res.ok) {
+        showError("Lỗi khi tải báo cáo tuần", data.error, data.details);
+      } else {
+        alert("Tải báo cáo tuần thành công!");
+        setReportFile(null);
       }
-      await client.end();
-      return res.json({ success: true, count: data.length });
-catch (e) {
-  console.error(e);
-  return res.status(500).json({ error: "Lỗi xử lý file", details: e.toString() });
-}
+    } catch (e) {
+      showError("Lỗi tải báo cáo tuần", e.message);
+    }
+    setLoading(false);
+  };
 
-  });
+  return (
+    <div style={{ padding: 24 }}>
+      <h1 style={{ fontWeight: "bold", fontSize: 32 }}>Tải lên Hợp đồng (PLHD.xlsx)</h1>
+      <div style={{ marginBottom: 16 }}>
+        <input type="file" onChange={handleContractChange} accept=".xlsx,.xls" />
+        <button onClick={handleUploadContract} disabled={loading}>
+          Gửi Hợp đồng
+        </button>
+      </div>
+      <h1 style={{ fontWeight: "bold", fontSize: 32 }}>Tải lên Báo cáo Tuần</h1>
+      <div style={{ marginBottom: 16 }}>
+        <input
+          type="date"
+          value={fromDate}
+          onChange={(e) => setFromDate(e.target.value)}
+          style={{ marginRight: 8 }}
+        />
+        <input
+          type="date"
+          value={toDate}
+          onChange={(e) => setToDate(e.target.value)}
+          style={{ marginRight: 8 }}
+        />
+        <input type="file" onChange={handleReportChange} accept=".xlsx,.xls,.csv" />
+        <button onClick={handleUploadReport} disabled={loading}>
+          Gửi Báo cáo Tuần
+        </button>
+      </div>
+      {loading && <p style={{ color: "#d17700" }}>Đang tải lên...</p>}
+    </div>
+  );
 }
-
-export default handler;
