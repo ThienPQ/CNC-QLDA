@@ -242,65 +242,78 @@ Với nội dung thế này thì lãnh đạo phải chỉ đạo gì để đ�
                   <th>% Hoàn thành so với HĐ</th>
                 </tr>
               </thead>
-              <tbody>
-                {Object.values(groupData).map((item, idx) => (
-                  <React.Fragment key={item.task.task_name}>
-                    <tr>
-                      <td>{idx + 1}</td>
-                      <td>{item.task.task_name}</td>
-                      <td>
-                        {(isNaN(item.contractQty) || !item.contractQty)
-                          ? ""
-                          : formatVnNumber(item.contractQty)
-                        }
-                      </td>
-                      <td>
-                        {isNaN(item.totalActual) || !item.totalActual ? "" : formatVnNumber(item.totalActual)}
-                      </td>
-                      <td>
-                        {item.percent === "" ? "" :
-                          Number(item.percent) > 200 ? (
-                            <span style={{ color: "red", fontWeight: 600 }}>{item.percent}%</span>
-                          ) : (
-                            `${item.percent}%`
-                          )}
-                      </td>
-                    </tr>
-                    {/* Nếu có ghi chú, render dòng ý kiến AI */}
-                    {item.note && item.note.trim() && (
-                      <tr>
-                        <td colSpan={5} style={{ background: "#f2f7fa", fontStyle: "italic" }}>
-                          <b>Ghi chú:</b> {item.note}<br />
-                          <button
-                            onClick={() => {
-                              if (!aiResponses[idx] || aiResponses[idx] === "Đang lấy ý kiến AI...") {
-                                fetchAiSuggestion({
-                                  taskName: item.task.task_name,
-                                  actualQty: formatVnNumber(item.lastWeekQty || item.totalActual),
-                                  contractQty: formatVnNumber(item.contractQty),
-                                  note: item.note,
-                                }, idx);
-                              }
-                            }}
-                            style={{
-                              background: "#0d47a1", color: "#fff", border: "none",
-                              borderRadius: 4, padding: "3px 12px", marginRight: 8, cursor: "pointer"
-                            }}>
-                            {aiResponses[idx] && aiResponses[idx] !== "Đang lấy ý kiến AI..." ? "Lấy lại ý kiến AI" : "Lấy ý kiến AI"}
-                          </button>
-                          <span>
-                            {aiResponses[idx] ? (
-                              <span style={{ color: "#263238" }}><b>Ý kiến AI:</b> {aiResponses[idx]}</span>
-                            ) : (
-                              <span style={{ color: "#607d8b" }}>Chưa có ý kiến AI</span>
-                            )}
-                          </span>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                ))}
-              </tbody>
+<tbody>
+  {Object.values(groupData).map((item, idx) => {
+    // Tìm ghi chú tuần mới nhất của công việc này trong weeklyReports
+    let noteRow = weeklyReports
+      .filter(
+        r =>
+          normalizeString(r.sub_name) === normalizeString(item.task.task_name) &&
+          (r.unit || "").toLowerCase() === (item.task.unit || item.task.dvt || item.task.donvi || "").toLowerCase() &&
+          r.note && r.note.trim()
+      )
+      .sort((a, b) => (b.to_date || "").localeCompare(a.to_date || ""))[0];
+
+    return (
+      <React.Fragment key={item.task.task_name}>
+        <tr>
+          <td>{idx + 1}</td>
+          <td>{item.task.task_name}</td>
+          <td>
+            {(isNaN(item.contractQty) || !item.contractQty)
+              ? ""
+              : formatVnNumber(item.contractQty)
+            }
+          </td>
+          <td>
+            {isNaN(item.totalActual) || !item.totalActual ? "" : formatVnNumber(item.totalActual)}
+          </td>
+          <td>
+            {item.percent === "" ? "" :
+              Number(item.percent) > 200 ? (
+                <span style={{ color: "red", fontWeight: 600 }}>{item.percent}%</span>
+              ) : (
+                `${item.percent}%`
+              )}
+          </td>
+        </tr>
+        {/* Nếu có note, render box ý kiến AI */}
+        {noteRow && noteRow.note && noteRow.note.trim() && (
+          <tr>
+            <td colSpan={5} style={{ background: "#f2f7fa", fontStyle: "italic" }}>
+              <b>Ghi chú:</b> {noteRow.note}<br />
+              <button
+                onClick={() => {
+                  if (!aiResponses[idx] || aiResponses[idx] === "Đang lấy ý kiến AI...") {
+                    fetchAiSuggestion({
+                      taskName: item.task.task_name,
+                      actualQty: formatVnNumber(item.totalActual),
+                      contractQty: formatVnNumber(item.contractQty),
+                      note: noteRow.note,
+                    }, idx);
+                  }
+                }}
+                style={{
+                  background: "#0d47a1", color: "#fff", border: "none",
+                  borderRadius: 4, padding: "3px 12px", marginRight: 8, cursor: "pointer"
+                }}>
+                {aiResponses[idx] && aiResponses[idx] !== "Đang lấy ý kiến AI..." ? "Lấy lại ý kiến AI" : "Lấy ý kiến AI"}
+              </button>
+              <span>
+                {aiResponses[idx] ? (
+                  <span style={{ color: "#263238" }}><b>Ý kiến AI:</b> {aiResponses[idx]}</span>
+                ) : (
+                  <span style={{ color: "#607d8b" }}>Chưa có ý kiến AI</span>
+                )}
+              </span>
+            </td>
+          </tr>
+        )}
+      </React.Fragment>
+    );
+  })}
+</tbody>
+
             </table>
           </div>
         ))}
