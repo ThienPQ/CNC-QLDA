@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import axios from "axios";
 
-// --- Các hàm xử lý số GIỮ NGUYÊN NHƯ BẢN ĐÃ OK ---
+// ======= Các hàm chuẩn số, tên =======
 function parseVnNumber(val) {
   if (typeof val === "number") return val;
   if (!val) return 0;
@@ -49,73 +49,28 @@ function normalizeString(str) {
   s = s.toLowerCase().replace(/\s+/g, " ").trim();
   return s;
 }
-function matchTask(subName, subUnit, task, taskUnit) {
-  if (normalizeString(subName) !== normalizeString(task)) return false;
-  const [subFactor, subDonvi] = getUnitFactor(subUnit);
-  const [taskFactor, taskDonvi] = getUnitFactor(taskUnit);
-  return subDonvi === taskDonvi;
+
+// ==== Gom nhóm lớn ====
+function getGroupDisplayName(groupName) {
+  const n = (groupName || "").toLowerCase();
+  if (n.includes("giao thông") || n.match(/^tuyến|^nút giao/)) return "Giao thông";
+  if (n.includes("thoát nước")) return "Thoát nước mưa";
+  if (n.includes("nội khu")) return "Tuyến nội khu";
+  if (n.includes("tuyến số 2")) return "Tuyến số 2";
+  if (n.includes("chính ct")) return "Tuyến chính CT";
+  if (n.includes("cải tạo")) return "Tuyến cải tạo";
+  return groupName || "Khác";
 }
-function findProjectTask(row, projectTasks) {
-  const subName = row.sub_name;
-  const subUnit = (row.unit || row.dvt || row.donvi || "").toLowerCase();
-  return (
-    projectTasks.find(
-      (pt) =>
-        matchTask(subName, subUnit, pt.task_name, (pt.unit || pt.dvt || pt.donvi || "").toLowerCase())
-    ) || null
-  );
-}
-function getTaskProgressByGroup(weeklyReports, projectTasks) {
+function groupWeeklyByBigGroup(weeklyReports) {
   const result = {};
-  for (const row of weeklyReports) {
-    const group = row.group_name || row.group_code || "Nhóm khác";
-    const subUnit = (row.unit || row.dvt || row.donvi || "").toLowerCase();
-    const matched = findProjectTask(row, projectTasks);
-
-    if (matched) {
-      const taskKey = matched.task_name;
-      const [taskFactor, taskDonvi] = getUnitFactor((matched.unit || matched.dvt || matched.donvi || "").toLowerCase());
-      const [subFactor, subDonvi] = getUnitFactor(subUnit);
-
-      if (!result[group]) result[group] = {};
-      if (!result[group][taskKey]) {
-        let contractQty = calcContractQuantity(matched.design_quantity, matched.unit || matched.dvt || matched.donvi);
-        result[group][taskKey] = {
-          task: matched,
-          contractQty,
-          totalActual: 0,
-        };
-      }
-
-      let v = parseWeekValue(row.thiet_ke, row.unit || row.dvt || row.donvi);
-      if (taskFactor !== subFactor && subFactor && taskFactor) {
-        v = v * (subFactor / taskFactor);
-      }
-      if (!isNaN(v) && v > 0) {
-        result[group][taskKey].totalActual += v;
-      }
-      // Gán luôn ghi chú của tuần mới nhất vào item
-      if (row.note && row.note.trim()) {
-        result[group][taskKey].note = row.note;
-        result[group][taskKey].lastWeekQty = v; // khối lượng tuần mới nhất có note
-      }
-    }
-  }
-  Object.values(result).forEach(groupData => {
-    Object.values(groupData).forEach(item => {
-      if (!item.contractQty || isNaN(item.contractQty) || item.contractQty <= 0) {
-        item.percent = "";
-      } else {
-        const per = (item.totalActual / item.contractQty) * 100;
-        item.percent = per.toFixed(2);
-      }
-    });
+  weeklyReports.forEach(row => {
+    const groupBig = getGroupDisplayName(row.group_name || "");
+    if (!result[groupBig]) result[groupBig] = [];
+    result[groupBig].push(row);
   });
   return result;
 }
 
-// --- PHẦN BỔ SUNG CHỈ ĐẠO AI: ---
-// Lưu ý: Bạn cần tạo API /api/ask-gpt theo hướng dẫn, hoặc tích hợp OpenAI key phía server!
 import React from "react";
 export default function LanhDaoBan() {
   const [weeklyReports, setWeeklyReports] = useState([]);
@@ -175,8 +130,6 @@ export default function LanhDaoBan() {
     fetchData();
   }, [fromDate, toDate]);
 
-  const progressByGroup = getTaskProgressByGroup(weeklyReports, projectTasks);
-
   // Hàm gọi API lấy ý kiến AI cho từng ghi chú
   async function fetchAiSuggestion({ taskName, actualQty, contractQty, note }, idx) {
     setAiResponses(r => ({ ...r, [idx]: "Đang lấy ý kiến AI..." }));
@@ -195,6 +148,19 @@ Với nội dung thế này thì lãnh đạo phải chỉ đạo gì để đ�
       setAiResponses(r => ({ ...r, [idx]: "Không thể lấy ý kiến AI, thử lại sau!" }));
     }
   }
+
+  // Tìm tuần báo cáo mới nhất để mặc định lọc
+  const latestToDate = weeklyReports.reduce((max, row) => {
+    if (row.to_date && (!max || row.to_date > max)) return row.to_date;
+    return max;
+  }, "");
+  // Dữ liệu theo tuần lọc (nếu không chọn tuần, mặc định tuần mới nhất)
+  const filteredWeekly = weeklyReports.filter(row => {
+    const date = row.to_date || "";
+    return (!fromDate || date >= fromDate) && (!toDate || date <= toDate);
+  });
+
+  const groupedWeekly = groupWeeklyByBigGroup(filteredWeekly);
 
   return (
     <div className="p-4">
@@ -223,101 +189,86 @@ Với nội dung thế này thì lãnh đạo phải chỉ đạo gì để đ�
         <div>Không có dữ liệu báo cáo.</div>
       )}
 
-      <div style={{ margin: "30px 0 40px 0" }}>
-        <h2 style={{ fontWeight: 700, fontSize: 25, color: "#1a3b6b" }}>
-          Tổng hợp tiến độ từng hạng mục/việc theo hợp đồng (theo từng tuyến/hạng mục)
-        </h2>
-        {Object.entries(progressByGroup).map(([groupName, groupData], i) => (
-          <div key={groupName} style={{ marginBottom: 30 }}>
-            <h3 style={{ fontWeight: 700, fontSize: 22, color: "#395989" }}>
-              {i + 1}. {groupName}
-            </h3>
-            <table border={2} cellPadding={8} style={{ marginBottom: 12, minWidth: 900, background: "#fff" }}>
-              <thead>
-                <tr>
-                  <th>STT</th>
-                  <th>Tên công việc (Hợp đồng)</th>
-                  <th>Khối lượng hợp đồng</th>
-                  <th>Tổng khối lượng thực hiện (tất cả tuần)</th>
-                  <th>% Hoàn thành so với HĐ</th>
-                </tr>
-              </thead>
-<tbody>
-  {Object.values(groupData).map((item, idx) => {
-    // Tìm ghi chú tuần mới nhất của công việc này trong weeklyReports
-    let noteRow = weeklyReports
-      .filter(
-        r =>
-          normalizeString(r.sub_name) === normalizeString(item.task.task_name) &&
-          (r.unit || "").toLowerCase() === (item.task.unit || item.task.dvt || item.task.donvi || "").toLowerCase() &&
-          r.note && r.note.trim()
-      )
-      .sort((a, b) => (b.to_date || "").localeCompare(a.to_date || ""))[0];
-
-    return (
-      <React.Fragment key={item.task.task_name}>
-        <tr>
-          <td>{idx + 1}</td>
-          <td>{item.task.task_name}</td>
-          <td>
-            {(isNaN(item.contractQty) || !item.contractQty)
-              ? ""
-              : formatVnNumber(item.contractQty)
-            }
-          </td>
-          <td>
-            {isNaN(item.totalActual) || !item.totalActual ? "" : formatVnNumber(item.totalActual)}
-          </td>
-          <td>
-            {item.percent === "" ? "" :
-              Number(item.percent) > 200 ? (
-                <span style={{ color: "red", fontWeight: 600 }}>{item.percent}%</span>
-              ) : (
-                `${item.percent}%`
-              )}
-          </td>
-        </tr>
-        {/* Nếu có note, render box ý kiến AI */}
-        {noteRow && noteRow.note && noteRow.note.trim() && (
-          <tr>
-            <td colSpan={5} style={{ background: "#f2f7fa", fontStyle: "italic" }}>
-              <b>Ghi chú:</b> {noteRow.note}<br />
-              <button
-                onClick={() => {
-                  if (!aiResponses[idx] || aiResponses[idx] === "Đang lấy ý kiến AI...") {
-                    fetchAiSuggestion({
-                      taskName: item.task.task_name,
-                      actualQty: formatVnNumber(item.totalActual),
-                      contractQty: formatVnNumber(item.contractQty),
-                      note: noteRow.note,
-                    }, idx);
-                  }
-                }}
-                style={{
-                  background: "#0d47a1", color: "#fff", border: "none",
-                  borderRadius: 4, padding: "3px 12px", marginRight: 8, cursor: "pointer"
-                }}>
-                {aiResponses[idx] && aiResponses[idx] !== "Đang lấy ý kiến AI..." ? "Lấy lại ý kiến AI" : "Lấy ý kiến AI"}
-              </button>
-              <span>
-                {aiResponses[idx] ? (
-                  <span style={{ color: "#263238" }}><b>Ý kiến AI:</b> {aiResponses[idx]}</span>
-                ) : (
-                  <span style={{ color: "#607d8b" }}>Chưa có ý kiến AI</span>
-                )}
-              </span>
-            </td>
-          </tr>
-        )}
-      </React.Fragment>
-    );
-  })}
-</tbody>
-
-            </table>
-          </div>
-        ))}
-      </div>
+      {/* HIỂN THỊ THEO NHÓM LỚN */}
+      {Object.entries(groupedWeekly).map(([bigGroup, rows], idxGroup) => (
+        <div key={bigGroup} style={{ marginBottom: 36 }}>
+          <h2 style={{ fontWeight: 700, fontSize: 24, color: "#0a3e6d" }}>
+            {idxGroup + 1}. {bigGroup}
+          </h2>
+          <table border={2} cellPadding={8} style={{ background: "#fff", minWidth: 1100 }}>
+            <thead>
+              <tr>
+                <th>STT</th>
+                <th>Tên công việc</th>
+                <th>Lý trình</th>
+                <th>Đơn vị</th>
+                <th>Khối lượng tuần</th>
+                <th>Khối lượng HĐ</th>
+                <th>% hoàn thành</th>
+                <th>Ghi chú</th>
+                <th>AI chỉ đạo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, idx) => {
+                const matched = projectTasks.find(
+                  (pt) =>
+                    normalizeString(pt.task_name) === normalizeString(row.sub_name) &&
+                    (pt.unit || pt.dvt || pt.donvi || "").toLowerCase() === (row.unit || "").toLowerCase()
+                );
+                const weekQty = parseWeekValue(row.thiet_ke, row.unit || "");
+                const contractQty = matched ? calcContractQuantity(matched.design_quantity, matched.unit || "") : 0;
+                const percent = (contractQty > 0 && weekQty > 0) ? ((weekQty / contractQty) * 100).toFixed(2) : "";
+                const aiKey = `${bigGroup}_${idx}`;
+                return (
+                  <React.Fragment key={idx}>
+                    <tr>
+                      <td>{idx + 1}</td>
+                      <td>{row.sub_name || ""}</td>
+                      <td>{row.ly_trinh || ""}</td>
+                      <td>{row.unit || ""}</td>
+                      <td>{formatVnNumber(weekQty)}</td>
+                      <td>{formatVnNumber(contractQty)}</td>
+                      <td>{percent ? `${percent}%` : ""}</td>
+                      <td>{row.note || ""}</td>
+                      <td>
+                        {(row.note && row.note.trim()) && (
+                          <>
+                            <button
+                              onClick={() => {
+                                if (!aiResponses[aiKey] || aiResponses[aiKey] === "Đang lấy ý kiến AI...") {
+                                  fetchAiSuggestion({
+                                    taskName: row.sub_name,
+                                    actualQty: formatVnNumber(weekQty),
+                                    contractQty: formatVnNumber(contractQty),
+                                    note: row.note,
+                                  }, aiKey);
+                                }
+                              }}
+                              style={{
+                                background: "#0d47a1", color: "#fff", border: "none",
+                                borderRadius: 4, padding: "3px 12px", cursor: "pointer"
+                              }}>
+                              {aiResponses[aiKey] && aiResponses[aiKey] !== "Đang lấy ý kiến AI..." ? "Lấy lại AI" : "Lấy ý kiến AI"}
+                            </button>
+                            <div>
+                              {(aiResponses[aiKey]) && (
+                                <div style={{ color: "#2d3d4b", marginTop: 3 }}>
+                                  <b>AI:</b> {aiResponses[aiKey]}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ))}
     </div>
   );
 }
