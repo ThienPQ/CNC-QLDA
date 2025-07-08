@@ -5,33 +5,26 @@ import XLSX from "xlsx";
 
 export const config = { api: { bodyParser: false } };
 
-// Đọc biến môi trường Neon/Vercel DB
 const PGHOST = process.env.PGHOST;
 const PGDATABASE = process.env.PGDATABASE;
 const PGUSER = process.env.PGUSER;
 const PGPASSWORD = process.env.PGPASSWORD;
 const PGPORT = process.env.PGPORT || 5432;
 
-// Hàm format số Việt Nam, 3 số lẻ, nhận mọi kiểu số
 function formatVN(val) {
   if (val === undefined || val === null || val === '') return '';
   let s = String(val).replace(/\s/g, '').replace(/[^0-9.,-]/g, '');
-  // Dạng 12.345,67 hoặc 12.345,6789
   if (/^\d{1,3}(\.\d{3})*(\,\d+)?$/.test(s)) {
     s = s.replace(/\./g, '').replace(',', '.');
-  }
-  // Dạng 12345,67 hoặc 12345,6789
-  else if (/^\d+(,\d+)?$/.test(s)) {
+  } else if (/^\d+(,\d+)?$/.test(s)) {
     s = s.replace(',', '.');
   }
-  // Dạng 12345.67 hoặc 12345.6789: giữ nguyên
   let num = Number(s);
   if (isNaN(num)) return '';
   let [nguyen, le] = num.toFixed(3).split('.');
   return nguyen.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + le;
 }
 
-// Lấy sheet "BC tuần..." mới nhất
 function getNewestBCTuanSheet(workbook) {
   const bcSheets = workbook.SheetNames.filter(s =>
     s.trim().toLowerCase().startsWith('bc tuần')
@@ -53,7 +46,6 @@ export default async function handler(req, res) {
     const ws = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-    // Kết nối DB Neon/Vercel
     const client = new Client({
       host: PGHOST,
       port: PGPORT,
