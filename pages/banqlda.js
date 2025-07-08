@@ -5,8 +5,6 @@ import axios from 'axios';
 export default function BanQLDA() {
   const [contractFile, setContractFile] = useState(null);
   const [reportFile, setReportFile] = useState(null);
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
 
   const uploadContract = async () => {
     if (!contractFile) return alert('Vui lòng chọn file hợp đồng');
@@ -21,16 +19,16 @@ export default function BanQLDA() {
     }
   };
 
-  const uploadReport = async () => {
-    if (!reportFile || !fromDate || !toDate) return alert('Nhập đủ thông tin trước khi gửi');
+  const uploadWeeklyReport = async () => {
+    if (!reportFile) return alert('Vui lòng chọn file báo cáo tuần');
     const form = new FormData();
     form.append('file', reportFile);
-    form.append('fromDate', fromDate);
-    form.append('toDate', toDate);
 
     try {
-      await axios.post('/api/upload-report', form);
-      alert('Tải báo cáo tuần thành công');
+      await axios.post('/api/upload-weekly-report', form, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      alert('Tải báo cáo tuần thành công và đã import vào CSDL!');
     } catch (error) {
       alert('Lỗi khi tải báo cáo tuần');
     }
@@ -43,10 +41,8 @@ export default function BanQLDA() {
       <button onClick={uploadContract}>Gửi Hợp đồng</button>
 
       <h2 style={{ marginTop: 40 }}>Tải lên Báo cáo Tuần</h2>
-      <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-      <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
       <input type="file" onChange={(e) => setReportFile(e.target.files[0])} />
-      <button onClick={uploadReport}>Gửi Báo cáo Tuần</button>
+      <button onClick={uploadWeeklyReport}>Gửi Báo cáo Tuần</button>
     </div>
   );
 }
