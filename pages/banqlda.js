@@ -96,7 +96,7 @@ export default function BanQLDA() {
     form.append('file', file);
 
     try {
-      const res = await axios.post('/api/upload-csv-to-db', form, {
+      const res = await axios.post('/api/test-upload', form, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       setImportResult(res.data && res.data.ok
