@@ -103,8 +103,9 @@ export default function BanQLDA() {
       setImportResult(res.data && res.data.ok
         ? `Đã nhập thành công ${res.data.imported} dòng vào DB!`
         : 'Có lỗi khi nhập dữ liệu báo cáo tuần.');
-    } catch {
-      setImportResult('Lỗi upload CSV');
+    } catch (error) {
+        alert('Lỗi upload CSV: ' + (error?.response?.data?.error || error.message || "unknown"));
+        console.error(error);setImportResult('Lỗi upload CSV');
     }
   };
 
