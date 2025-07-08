@@ -17,9 +17,9 @@ export default async function handler(req, res) {
   const form = new formidable.IncomingForm({ keepExtensions: true });
   form.parse(req, async (err, fields, files) => {
     if (err) return res.status(500).json({ error: "File upload error!" });
+    if (!files || !files.file) return res.status(400).json({ error: "Missing file!" });
     const csvPath = files.file.filepath || files.file.path;
 
-    // Kết nối DB
     const client = new Client({
       host: PGHOST,
       port: PGPORT,
@@ -30,9 +30,8 @@ export default async function handler(req, res) {
     });
     await client.connect();
 
-    let importCount = 0, errCount = 0;
+    let importCount = 0, errCount = 0, done = false;
 
-    // Đọc file CSV, parse từng dòng và insert
     fs.createReadStream(csvPath)
       .pipe(parse({ columns: true, skip_empty_lines: true }))
       .on('data', async (row) => {
@@ -64,12 +63,18 @@ export default async function handler(req, res) {
         }
       })
       .on('end', async () => {
-        await client.end();
-        res.json({ ok: true, imported: importCount, errors: errCount });
+        if (!done) {
+          done = true;
+          await client.end();
+          res.json({ ok: true, imported: importCount, errors: errCount });
+        }
       })
       .on('error', async (err) => {
-        await client.end();
-        res.status(500).json({ error: 'CSV parse error: ' + err.message });
+        if (!done) {
+          done = true;
+          await client.end();
+          res.status(500).json({ error: 'CSV parse error: ' + err.message });
+        }
       });
   });
 }

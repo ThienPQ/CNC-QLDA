@@ -7,7 +7,7 @@ export default function BanQLDA() {
   const [csvPreview, setCsvPreview] = useState([]);
   const [importResult, setImportResult] = useState(null);
 
-  // Hàm chuẩn hóa số VN 3 số lẻ
+  // Hàm chuẩn hóa số Việt Nam, 3 số lẻ sau dấu phẩy
   function formatVN(val) {
     if (val === undefined || val === null || val === '') return '';
     let s = String(val).replace(/\s/g, '').replace(/[^0-9.,-]/g, '');
@@ -22,7 +22,6 @@ export default function BanQLDA() {
     return nguyen.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + le;
   }
 
-  // Chuyển file xlsx thành CSV và tự động upload
   const convertAndUploadCSV = async () => {
     setImportResult(null);
     if (!reportFile) return alert('Chọn file Excel trước');
@@ -103,9 +102,9 @@ export default function BanQLDA() {
       setImportResult(res.data && res.data.ok
         ? `Đã nhập thành công ${res.data.imported} dòng vào DB!`
         : 'Có lỗi khi nhập dữ liệu báo cáo tuần.');
-    } catch (error) {
-        alert('Lỗi upload CSV: ' + (error?.response?.data?.error || error.message || "unknown"));
-        console.error(error);setImportResult('Lỗi upload CSV');
+    } catch (err) {
+      setImportResult('Lỗi upload CSV: ' + (err?.response?.data?.error || err.message || "unknown"));
+      console.error(err);
     }
   };
 
